@@ -46,6 +46,7 @@ dependency-rules.json           项目标记与目录隔离规则
 .runtime/                      自动生成的挂载配置和路径清单，不提交 Git
 dev-runtime/home/                       dev 家目录的宿主机存储，不提交 Git、不进入镜像构建
 dev-runtime/ssh-host-keys/              SSH 主机密钥的宿主机存储，不提交 Git、不进入镜像构建
+host-agent/                     可选的容器 → Mac Codex 任务桥接与 Herdr 面板管理
 ```
 
 `proxy` 和临时辅助容器直接使用 `metacubex/mihomo:latest`，不构建代理镜像。该镜像已包含脚本使用的 `ip`、`iptables`、`nc` 和 shell。这里使用 TCP REDIRECT，不需要 TUN 或 `/dev/net/tun`。
@@ -153,6 +154,10 @@ SSH 密钥目录和 Tailscale 状态目录由启动脚本初始化，普通 `dow
 ```bash
 python3 scripts/dev.py compose up -d --no-deps --force-recreate proxy
 ```
+
+### 容器 → Mac 任务桥接（可选）
+
+需要 Xcode／iOS 模拟器、macOS 桌面会话／Computer Use 或宿主机专有访问条件时，可按需启用 `host-agent/`：容器通过受控文件信箱将任务委派给宿主机已有的 Codex App Server 串行执行，并可在宿主机 Herdr 中自动打开查看面板，不暴露宿主机网络或控制 socket。默认不启用；准备与启用方式见 [host-agent/README.md](host-agent/README.md)。
 
 ### 持久化 dev 家目录
 

@@ -46,6 +46,7 @@ dependency-rules.json           项目标记与目录隔离规则
 .runtime/                      自动生成的挂载配置和路径清单，不提交 Git
 dev-runtime/home/                       dev 家目录的宿主机存储，不提交 Git、不进入镜像构建
 dev-runtime/ssh-host-keys/              SSH 主机密钥的宿主机存储，不提交 Git、不进入镜像构建
+host-agent/                     可选的容器 → Mac Codex 任务桥接与 Herdr 面板管理
 ```
 
 `proxy` 和网络守护容器直接使用 `metacubex/mihomo:v1.19.19`，不构建代理镜像。该镜像已包含脚本使用的 `ip`、`iptables`、`nc` 和 shell。这里使用 TCP REDIRECT，不需要 TUN 或 `/dev/net/tun`。
@@ -191,6 +192,10 @@ Herdr 的 `~/.config/herdr` 随 `dev-runtime/home/` 持久化，保存配置、`
 挂载覆盖整个媒体目录，新截图的子目录会自动可见。文件仍由宿主机管理，CleanShot 清理截图后容器也无法再读取。此挂载不传输剪贴板内容，也不共享其他电脑的截图。换用其他 Mac 用户时应同步修改 `source` 和 `target`；不使用 CleanShot 的主机可移除此挂载。
 
 修改后通过 `python3 scripts/dev.py compose up -d --no-deps --force-recreate dev` 应用。该操作保留生成的依赖挂载和持久化数据，但会断开现有 SSH 会话。
+
+### 容器 → Mac 任务桥接（可选）
+
+需要 Xcode／iOS 模拟器、macOS 桌面会话／Computer Use 或宿主机专有访问条件时，可按需启用 `host-agent/`：容器通过受控文件信箱将任务委派给宿主机已有的 Codex App Server 串行执行，并可在宿主机 Herdr 中自动打开查看面板，不暴露宿主机网络或控制 socket。默认不启用；准备与启用方式见 [host-agent/README.md](host-agent/README.md)。
 
 ### 持久化 dev 家目录
 

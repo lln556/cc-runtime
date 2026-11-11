@@ -28,6 +28,8 @@ def compose(*args, overlay=False, capture=False):
     command = ["docker", "compose", "--project-directory", str(ROOT), "-f", str(BASE)]
     if overlay:
         command += ["-f", str(OVERLAY)]
+    if (ROOT / "host-agent/config/enabled").exists():
+        command += ["-f", str(ROOT / "host-agent/compose.yaml")]
     return run(command + list(args), capture=capture)
 
 

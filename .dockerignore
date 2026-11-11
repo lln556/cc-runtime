@@ -13,3 +13,4 @@ ssh-host-keys/
 dev-runtime/
 tailscale/
 dependency-rules.local.json
+host-agent/

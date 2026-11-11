@@ -9,3 +9,7 @@ dev-runtime/home/
 dev-runtime/ssh-host-keys/
 tailscale/state/
 dependency-rules.local.json
+host-agent/state/
+host-agent/config/local.json
+host-agent/config/execution.local.md
+host-agent/config/enabled

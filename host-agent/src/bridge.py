@@ -14,6 +14,7 @@ import time
 import uuid
 
 from rpc import CodexRPC, RpcError
+from storage import Mailbox
 from views import HerdrError, HerdrViews
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +30,9 @@ def now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def atomic(path, value):
+def atomic(path, value, *, root=None):
+    if root is not None:
+        return Mailbox(root).atomic(path, value)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
@@ -49,7 +52,9 @@ def atomic(path, value):
         temporary.unlink(missing_ok=True)
 
 
-def read(path):
+def read(path, *, root=None):
+    if root is not None:
+        return Mailbox(root).read(path)
     path = Path(path)
     if path.is_symlink():
         raise ValueError(f"Refusing symlink: {path}")
@@ -84,7 +89,8 @@ def config(path):
         raise ValueError("approval_policy must be on-request or never")
     for key in ("socket", "mailbox", "host_state", "instructions"):
         item = Path(data[key]).expanduser()
-        data[key] = (item if item.is_absolute() else path.parent / item).resolve()
+        item = item if item.is_absolute() else path.parent / item
+        data[key] = item.parent.resolve() / item.name if key == "mailbox" else item.resolve()
     local_instructions = data.get("local_instructions", "execution.local.md")
     if local_instructions is not None:
         if not isinstance(local_instructions, str) or not local_instructions.strip():
@@ -124,31 +130,32 @@ def check_request(request, projects):
 
 
 def submit(mailbox, project, text, commit, authorization, after=None, title=None):
-    capabilities = read(mailbox / "capabilities.json")
+    capabilities = read(mailbox / "capabilities.json", root=mailbox)
     request = {"version": 1, "id": uuid.uuid4().hex, "project": project,
                "task": text, "expected_commit": commit, "authorization": authorization,
                "after": after, "created_at": now()}
     if title is not None:
         request["title"] = title.strip()
     check_request(request, capabilities["projects"])
-    atomic(mailbox / "inbox" / (request["id"] + ".json"), request)
+    atomic(mailbox / "inbox" / (request["id"] + ".json"), request, root=mailbox)
     return {"task_id": request["id"], "state": "queued"}
 
 
 def control(mailbox, identifier, kind, text=None):
+    files = Mailbox(mailbox)
     identifier = task_id(identifier)
     job = mailbox / "jobs" / identifier
     queued = mailbox / "inbox" / (identifier + ".json")
-    if not queued.exists() and not (job / "status.json").exists():
+    if not files.exists(queued) and not files.exists(job / "status.json"):
         raise ValueError("Unknown task")
-    if (job / "status.json").exists():
-        state = read(job / "status.json")["state"]
+    if files.exists(job / "status.json"):
+        state = files.read(job / "status.json")["state"]
         if state in TERMINAL:
             raise ValueError("Task has ended; submit a new task with --after to continue")
     elif kind == "message":
         raise ValueError("Task is still queued; wait until it is running")
     event = {"id": uuid.uuid4().hex, "kind": kind, "text": text, "created_at": now()}
-    atomic(mailbox / "controls" / identifier / (event["id"] + ".json"), event)
+    files.atomic(mailbox / "controls" / identifier / (event["id"] + ".json"), event)
     return {"task_id": identifier, "control_id": event["id"], "state": "queued"}
 
 
@@ -156,6 +163,7 @@ class Worker:
     def __init__(self, settings, rpc_factory=CodexRPC):
         self.config = settings
         self.mailbox = settings["mailbox"]
+        self.files = Mailbox(self.mailbox)
         self.private = settings["host_state"]
         self.rpc_factory = rpc_factory
         self.stop = False
@@ -166,16 +174,17 @@ class Worker:
     def prepare(self):
         self.private.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.private.chmod(0o700)
-        self.mailbox.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.mailbox.chmod(0o700)
-        for path in [self.mailbox / "inbox", self.mailbox / "jobs",
-                     self.mailbox / "controls", self.private / "jobs", self.private / "decisions"]:
+        with self.files.directory(self.mailbox, create=True) as directory:
+            os.fchmod(directory, 0o700)
+        for name in ("inbox", "jobs", "controls"):
+            self.files.mkdir(self.mailbox / name)
+        for path in [self.private / "jobs", self.private / "decisions"]:
             path.mkdir(parents=True, exist_ok=True)
-        if not (self.mailbox / "capabilities.json").exists():
+        if not self.files.exists(self.mailbox / "capabilities.json"):
             self.heartbeat("offline")
 
     def heartbeat(self, state="ready", active=None):
-        atomic(self.mailbox / "capabilities.json", {
+        self.files.atomic(self.mailbox / "capabilities.json", {
             "version": 1, "updated_at": now(), "worker_state": state,
             "heartbeat_timeout_seconds": 90,
             "active_task": active,
@@ -206,10 +215,10 @@ class Worker:
         # Authoritative host journal is never mounted into the container.
         atomic(self.private / "jobs" / (identifier + ".json"), record)
         public = {k: v for k, v in record.items() if k not in {"request", "execution_config"}}
-        atomic(self.mailbox / "jobs" / identifier / "status.json", public)
+        self.files.atomic(self.mailbox / "jobs" / identifier / "status.json", public)
 
     def finish(self, record, state, text="", error=None):
-        atomic(self.mailbox / "jobs" / record["id"] / "result.json", {
+        self.files.atomic(self.mailbox / "jobs" / record["id"] / "result.json", {
             "task_id": record["id"], "state": state, "text": text, "error": error,
             "thread_id": record.get("thread_id"), "turn_id": record.get("turn_id"),
             "finished_at": now(),
@@ -221,20 +230,20 @@ class Worker:
 
     def controls(self, record):
         directory = self.mailbox / "controls" / record["id"]
-        for path in sorted(directory.glob("*.json"), key=lambda p: (p.stat().st_mtime_ns, p.name)):
+        for path in self.files.json_files(directory):
             try:
-                event = read(path)
+                event = self.files.read(path)
                 task_id(event["id"])
                 if path.stem != event["id"] or event["kind"] not in {"cancel", "message"}:
                     raise ValueError("Invalid control")
                 yield path, event
             except (ValueError, KeyError, OSError):
-                path.rename(path.with_suffix(".invalid"))
+                self.files.invalidate(path)
 
     def ack(self, record, path, event, state, error=None):
-        atomic(self.mailbox / "jobs" / record["id"] / "controls" / (event["id"] + ".json"),
+        self.files.atomic(self.mailbox / "jobs" / record["id"] / "controls" / (event["id"] + ".json"),
                {"control_id": event["id"], "state": state, "error": error})
-        path.unlink(missing_ok=True)
+        self.files.unlink(path)
 
     def reconcile(self, record):
         """After a disconnect/crash, stop the old turn; never replay its prompt."""
@@ -319,11 +328,15 @@ class Worker:
         self.save(record, "running", pending=None)
 
     def monitor(self, rpc, record):
+        job = self.mailbox / "jobs" / record["id"]
+        with self.files.event_log(job / "events.jsonl") as events:
+            self._monitor(rpc, record, events)
+
+    def _monitor(self, rpc, record, events):
         deadline = time.monotonic() + self.config.get("task_timeout_seconds", 3600)
         cancel_deadline = None
         cancellation_reason = None
         messages = []
-        job = self.mailbox / "jobs" / record["id"]
         while True:
             self.heartbeat("busy", record["id"])
             for path, event in self.controls(record):
@@ -357,8 +370,7 @@ class Worker:
                 continue
             if event.get("method", "").startswith("codex/event/"):
                 continue  # Legacy duplicate stream; persist the v2 events only.
-            with (job / "events.jsonl").open("a") as stream:
-                stream.write(json.dumps(event, ensure_ascii=False) + "\n")
+            self.files.append_event(events, event)
             method = event.get("method")
             if "id" in event and method:
                 self.handle_request(rpc, record, event)
@@ -402,7 +414,7 @@ class Worker:
                   "created_at": now(), "thread_id": None, "turn_id": None, "pending": None}
         self.save(record, "starting")
         job = self.mailbox / "jobs" / identifier
-        atomic(job / "request.json", request)
+        self.files.atomic(job / "request.json", request)
         try:
             check_request(request, self.config["projects"])
             for path, event in self.controls(record):
@@ -416,7 +428,7 @@ class Worker:
             if actual_commit != request["expected_commit"]:
                 raise ValueError(f"Commit mismatch: expected {request['expected_commit']}, found {actual_commit}")
             artifacts = job / "artifacts"
-            artifacts.mkdir(exist_ok=True)
+            self.files.mkdir(artifacts)
             instructions = self.load_instructions()
             prompt = (f"委派任务：\n{request['task']}\n\n授权范围：\n{request['authorization']}\n\n"
                       f"项目：{request['project']}\n提交：{actual_commit}\n"
@@ -491,16 +503,16 @@ class Worker:
                         self.probe()
                         next_probe = time.monotonic() + 30
                     self.heartbeat("ready" if self.probed else "offline")
-                    for path in sorted((self.mailbox / "inbox").glob("*.json"), key=lambda p: (p.stat().st_mtime_ns, p.name)):
+                    for path in self.files.json_files(self.mailbox / "inbox"):
                         try:
-                            request = read(path)
+                            request = self.files.read(path)
                             if path.stem != task_id(request["id"]):
                                 raise ValueError("Request ID does not match its filename")
                         except (OSError, ValueError, KeyError):
-                            path.rename(path.with_suffix(".invalid"))
+                            self.files.invalidate(path)
                             continue
                         self.run_task(request)
-                        path.unlink(missing_ok=True)
+                        self.files.unlink(path)
                         if not self.recover():
                             raise ValueError("Task state is unknown; worker stopped to avoid overlapping execution")
                         if once or self.stop:
@@ -549,9 +561,11 @@ def main(argv=None):
     response.add_argument("--result-file", type=Path, help="Exact JSON-RPC result object for input/permission requests")
     args = parser.parse_args(argv)
     try:
-        mailbox = args.mailbox.expanduser().resolve()
+        mailbox = args.mailbox.expanduser()
+        mailbox = mailbox.parent.resolve() / mailbox.name
+        files = Mailbox(mailbox)
         if args.command == "capabilities":
-            result = read(mailbox / "capabilities.json")
+            result = read(mailbox / "capabilities.json", root=mailbox)
             stamp = datetime.datetime.fromisoformat(result["updated_at"])
             result["heartbeat_age_seconds"] = round((datetime.datetime.now(datetime.timezone.utc) - stamp).total_seconds(), 1)
             result["online"] = result["heartbeat_age_seconds"] < result.get("heartbeat_timeout_seconds", 90) and result["worker_state"] not in {"offline", "blocked"}
@@ -563,12 +577,12 @@ def main(argv=None):
             print_json(control(mailbox, args.task_id, args.command, getattr(args, "text", None)))
         elif args.command in {"status", "result"}:
             path = mailbox / "jobs" / args.task_id / (args.command + ".json")
-            if args.command == "status" and not path.exists() and (mailbox / "inbox" / (args.task_id + ".json")).exists():
+            if args.command == "status" and not files.exists(path) and files.exists(mailbox / "inbox" / (args.task_id + ".json")):
                 print_json({"id": args.task_id, "state": "queued"})
             else:
-                result = read(path)
+                result = files.read(path)
                 if args.command == "status":
-                    result["controls"] = [read(p) for p in sorted((path.parent / "controls").glob("*.json"))]
+                    result["controls"] = [files.read(p) for p in sorted(files.json_files(path.parent / "controls"))]
                 print_json(result)
         else:
             settings = config(args.config)
@@ -579,7 +593,7 @@ def main(argv=None):
             elif args.command == "probe":
                 worker.prepare()
                 worker.probe()
-                print_json(read(worker.mailbox / "capabilities.json"))
+                print_json(worker.files.read(worker.mailbox / "capabilities.json"))
                 if not worker.probed:
                     raise ValueError("Cannot reach the configured Codex App Server")
             elif args.command == "respond":

@@ -147,6 +147,132 @@ class MailboxTests(unittest.TestCase):
         self.assertIn("Commit mismatch", self.result(request)["error"])
         self.assertFalse(self.rpc.calls)
 
+    def test_job_directory_symlink_cannot_overwrite_host_status(self):
+        request = self.request()
+        outside = self.root / "outside"
+        outside.mkdir()
+        target = outside / "status.json"
+        target.write_text('original host status\n')
+        (self.worker.mailbox / "jobs" / request["id"]).symlink_to(outside)
+        self.rpc.completed()
+        with self.assertRaises((OSError, ValueError)):
+            self.worker.run_task(request)
+        self.assertEqual(target.read_text(), 'original host status\n')
+        self.assertFalse(self.rpc.calls)
+
+    def test_directory_swap_during_publish_cannot_redirect_status(self):
+        request = self.request()
+        job = self.worker.mailbox / "jobs" / request["id"]
+        job.mkdir()
+        moved = job.with_name("moved-job")
+        outside = self.root / "outside"
+        outside.mkdir()
+        target = outside / "status.json"
+        target.write_text("original host status\n")
+        replace = os.replace
+        swapped = []
+
+        def swap(source, destination, *args, **kwargs):
+            if Path(destination).name == "status.json" and not swapped:
+                swapped.append(True)
+                job.rename(moved)
+                job.symlink_to(outside)
+                (outside / Path(source).name).write_text("attacker-controlled replacement")
+            return replace(source, destination, *args, **kwargs)
+
+        with patch("os.replace", side_effect=swap):
+            self.worker.save({"id": request["id"]}, "starting")
+        self.assertTrue(swapped)
+        self.assertEqual(target.read_text(), "original host status\n")
+        self.assertEqual(read(moved / "status.json")["state"], "starting")
+
+    def test_event_log_links_cannot_append_to_host_files(self):
+        for kind in ("symlink", "hardlink"):
+            with self.subTest(kind=kind):
+                request = self.request()
+                job = self.worker.mailbox / "jobs" / request["id"]
+                job.mkdir()
+                target = self.root / (kind + "-host.log")
+                target.write_text("original host log\n")
+                if kind == "symlink":
+                    (job / "events.jsonl").symlink_to(target)
+                else:
+                    os.link(target, job / "events.jsonl")
+                self.rpc.completed()
+                self.worker.run_task(request)
+                self.assertEqual(target.read_text(), "original host log\n")
+                self.assertNotEqual(self.status(request)["state"], "completed")
+
+    def test_artifact_directory_symlink_is_rejected_before_start(self):
+        request = self.request()
+        job = self.worker.mailbox / "jobs" / request["id"]
+        job.mkdir()
+        (job / "artifacts").symlink_to(self.root)
+        self.rpc.completed()
+        self.worker.run_task(request)
+        self.assertEqual(self.status(request)["state"], "failed")
+        self.assertFalse(self.rpc.calls)
+
+    def test_inbox_directory_symlink_cannot_consume_host_files(self):
+        request = self.request()
+        inbox = self.worker.mailbox / "inbox"
+        original = inbox / (request["id"] + ".json")
+        outside = self.root / "outside-inbox"
+        outside.mkdir()
+        target = outside / original.name
+        original.rename(target)
+        inbox.rmdir()
+        inbox.symlink_to(outside)
+        self.rpc.completed()
+        with self.assertRaises((OSError, ValueError)):
+            self.worker.run(once=True)
+        self.assertTrue(target.exists())
+        self.assertFalse(self.rpc.calls)
+
+    def test_controls_directory_symlink_cannot_rename_host_files(self):
+        request = self.request()
+        outside = self.root / "outside-controls"
+        outside.mkdir()
+        target = outside / ("b" * 32 + ".json")
+        target.write_text("[]")
+        (self.worker.mailbox / "controls" / request["id"]).symlink_to(outside)
+        with self.assertRaises((OSError, ValueError)):
+            list(self.worker.controls(request))
+        self.assertEqual(target.read_text(), "[]")
+        self.assertFalse(target.with_suffix(".invalid").exists())
+
+    def test_client_cannot_read_result_through_job_directory_symlink(self):
+        identifier = "a" * 32
+        outside = self.root / "outside-result"
+        outside.mkdir()
+        (outside / "result.json").write_text('{"private":"host-only-value"}')
+        (self.worker.mailbox / "jobs" / identifier).symlink_to(outside)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as stopped:
+            main(["--mailbox", str(self.worker.mailbox), "result", identifier])
+        self.assertEqual(stopped.exception.code, 1)
+        self.assertNotIn("host-only-value", output.getvalue())
+
+    def test_client_does_not_resolve_mailbox_root_symlink(self):
+        alias = self.root / "mailbox-alias"
+        alias.symlink_to(self.worker.mailbox)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as stopped:
+            main(["--mailbox", str(alias), "capabilities"])
+        self.assertEqual(stopped.exception.code, 1)
+        self.assertNotIn("worker_state", output.getvalue())
+
+    def test_prepare_rejects_root_symlink_without_changing_host_permissions(self):
+        outside = self.root / "outside-root"
+        outside.mkdir(mode=0o755)
+        alias = self.root / "mailbox-alias"
+        alias.symlink_to(outside)
+        worker = Worker({**self.worker.config, "mailbox": alias}, self.rpc)
+        with self.assertRaises(OSError):
+            worker.prepare()
+        self.assertEqual(outside.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_cancel_queued_task_never_starts_codex(self):
         request = self.request()
         control(self.worker.mailbox, request["id"], "cancel")

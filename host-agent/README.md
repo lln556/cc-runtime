@@ -80,19 +80,21 @@ host-agent/bin/host-agent respond TASK_ID --token TOKEN --decision accept
 
 - worker 串行执行并用宿主机锁阻止重复启动；不同终端或桌面任务不受该锁控制。
 - 任务 ID 写入宿主机日志后，不因重复投递再次执行。请求、状态和结果以临时文件加重命名发布；事件流按行追加。
+- 信箱根目录及其内部目录不得使用符号链接。worker 和客户端通过目录描述符读写、发布和清理信箱文件，拒绝链接导致的路径跳转；JSON 读取和事件追加还拒绝硬链接及非普通文件。事件日志在整轮任务中复用已打开的文件描述符。发现不安全路径时拒绝处理或停止 worker，不沿该路径继续写入；排查后保留私有任务日志并按恢复流程重启。
 - 超时默认一小时，含等待审批；可以在配置中调整。取消和停止服务会请求中断，并等待终态。中断不回滚已完成的操作。
 - 断线或进程崩溃后，先核对并停止旧会话，不自动重放任务。无法确认执行停止时标为 unknown，阻止领取新任务。恢复 Codex 后重启 worker 再核对；不要删除日志来“重试”。
 - 服务退出期间仍可排队，但状态会显示离线。capabilities 的工具发现可能滞后；更新 Codex 或插件后重启 worker 重新探测。
 - Mac 登录时若 Codex 尚未启动，空闲 worker 每 30 秒重试连接；无需重装服务。
 - 这是受信任开发环境中的委派工具，授权文字与共享文件不构成对恶意容器的安全隔离。不要把任意不受信任工作负载接入此信箱。
 
+信箱路径保护要求其宿主机父目录由宿主机管理，且私有状态没有经其他挂载暴露给客户端；它保护桥接自身的文件操作，不替代 Codex 的执行沙箱，也不限制任务执行器通过普通路径写入产物。
+
 查看服务：`launchctl print gui/$(id -u)/local.cc-runtime.host-agent`。日志位于 `state/host/`。停用时 bootout 对应 LaunchAgent，移除 `config/enabled`，再通过 `scripts/dev.py compose` 重建 dev；保留 state 以便检查执行记录。
 
 ## 验证
 
 ```bash
-python3 -m unittest discover -s tests -p test_host_agent.py -v
-python3 -m unittest discover -s tests -p test_host_agent_views.py -v
+python3 -m unittest discover -s tests -p 'test_host_agent*.py' -v
 python3 -m unittest discover -s tests -p test_dependencies.py -v
 ```
 

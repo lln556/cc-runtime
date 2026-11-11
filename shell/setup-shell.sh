@@ -10,6 +10,10 @@ cp "$SCRIPT_DIR/zshenv" "$HOME/.zshenv"
 cp "$SCRIPT_DIR/zimrc" "$HOME/.zimrc"
 cp "$SCRIPT_DIR/zshrc" "$HOME/.zshrc"
 
+# Ghostty SSH sessions need their native cursor and redraw capabilities.
+tic -x -o "$HOME/.terminfo" "$SCRIPT_DIR/xterm-ghostty.terminfo"
+infocmp -x xterm-ghostty >/dev/null
+
 mkdir -p "$ZIM_HOME"
 # GitHub 经代理时 HTTP/2 容易被中途断开，下载和随后的 git clone 都走 HTTP/1.1。
 git config --global http.version HTTP/1.1

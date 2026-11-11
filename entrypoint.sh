@@ -103,6 +103,13 @@ HostKey /var/lib/cc-runtime/ssh/ssh_host_ed25519_key
 CONFIG
 SSH_KEYS
 
+# Keep Herdr state on the persistent home, and Unix sockets on Linux tmpfs.
+sudo install -d -m 700 -o dev -g dev /run/herdr
+mkdir -p /home/dev/.config/herdr
+# SSH sessions do not inherit the container environment; PAM reads this file.
+sudo sed -i '/^HERDR_SOCKET_PATH=/d' /etc/environment
+printf '%s\n' 'HERDR_SOCKET_PATH=/run/herdr/herdr.sock' | sudo tee -a /etc/environment > /dev/null
+
 sudo sed -i "s/^#*Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
 sudo mkdir -p /run/sshd
 sudo /usr/sbin/sshd -t

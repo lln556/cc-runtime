@@ -1,3 +1,4 @@
+.DS_Store
 .env
 proxy/config.yaml
 .runtime/
@@ -7,6 +8,4 @@ ssh-host-keys/
 dev-runtime/home/
 dev-runtime/ssh-host-keys/
 tailscale/state/
-
-
-docs/local/
+dependency-rules.local.json

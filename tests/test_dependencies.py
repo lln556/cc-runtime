@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from unittest.mock import patch
 import uuid
 
@@ -91,6 +92,41 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(one["entries"], two["entries"])
         self.assertNotEqual(one["entries"][0]["subpath"], other["entries"][0]["subpath"])
         self.assertEqual(one["volume"], other["volume"])
+
+
+class MultiWorkspaceTests(unittest.TestCase):
+    def test_generate_keeps_namespaces_and_single_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            company, personal = root / "company", root / "personal"
+            for workspace in (company, personal):
+                (workspace / "app").mkdir(parents=True)
+                (workspace / "app/package.json").write_text("{}")
+            model = {"name": "test", "services": {"dev": {"volumes": [
+                {"type": "bind", "source": str(company), "target": dev.WORKSPACE_TARGET},
+                {"type": "bind", "source": str(personal), "target": dev.PERSONAL_TARGET}]}}}
+            state = root / "state"
+            with mock.patch.object(dev, "compose", return_value=json.dumps(model)), \
+                 mock.patch.object(dev, "run", return_value="aarch64"), \
+                 mock.patch.object(dev, "STATE", state), \
+                 mock.patch.object(dev, "OVERLAY", state / "overlay.json"):
+                _, plan = dev.generate()
+                overlay = json.loads((state / "overlay.json").read_text())
+                volumes = overlay["services"]["dev"]["volumes"]
+                self.assertEqual({m["target"] for m in volumes}, {
+                    dev.WORKSPACE_TARGET + "/app/node_modules",
+                    dev.PERSONAL_TARGET + "/app/node_modules", "/home/dev/.cache"})
+                self.assertEqual(len(plan["entries"]), 2)
+                self.assertEqual(len({e["subpath"] for e in plan["entries"]}), 2)
+                self.assertEqual([len(w["entries"]) for w in plan["workspaces"]], [1, 1])
+                _, original = dev.make_plan(company, [{"path": "app/node_modules"}], "test", "aarch64")
+                self.assertEqual(original["cache_subpath"], plan["cache_subpath"])
+                self.assertEqual(original["entries"][0]["subpath"], plan["entries"][0]["subpath"])
+                # Reject mounting the same host tree under a second alias.
+                model["services"]["dev"]["volumes"][1]["source"] = str(company)
+                with mock.patch.object(dev, "compose", return_value=json.dumps(model)):
+                    with self.assertRaisesRegex(ValueError, "overlap"):
+                        dev.generate()
 
 
 @unittest.skipUnless(os.environ.get("CC_RUNTIME_DOCKER_TEST") == "1", "opt-in Docker integration")

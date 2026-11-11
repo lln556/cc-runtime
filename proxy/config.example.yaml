@@ -1,33 +1,49 @@
-# Copy to config.yaml and replace both proxies before starting.
-# This file is native Mihomo YAML: Compose does NOT expand variables here.
-# Controller address and secret are provided by proxy-entrypoint.sh from .env.
-# Connect your own UI to http://127.0.0.1:19090; no UI is deployed here.
+# US airport failover -> DMIT VLESS Reality exit. Fill all REPLACE_ fields.
 mode: rule
 log-level: info
 ipv6: false
 allow-lan: true
 bind-address: '*'
 redir-port: 7893
-
 proxies:
-  # Replace this entire entry with ONE complete node from your Clash subscription.
-  # Keep the name "airport". Preserve its TLS/SNI/transport options.
-  - name: airport
-    type: ss
-    server: airport.example.com
-    port: 443
-    cipher: chacha20-ietf-poly1305
-    password: REPLACE_AIRPORT_PASSWORD
-
-  - name: residential
-    type: http
-    server: residential.example.com
-    port: 12345
-    username: REPLACE_RESIDENTIAL_USER
-    password: REPLACE_RESIDENTIAL_PASSWORD
-    # For an HTTPS proxy, also set tls: true (only if the provider supports it).
-    dialer-proxy: airport
-
+# Replace these entries with complete US nodes from your Clash subscription.
+# Keep the experimental node first; preserve each node's protocol options.
+- name: airport-us-experimental
+  type: ss
+  server: REPLACE_AIRPORT_SERVER
+  port: 443
+  cipher: chacha20-ietf-poly1305
+  password: REPLACE_AIRPORT_PASSWORD
+- name: airport-us-backup
+  type: ss
+  server: REPLACE_BACKUP_SERVER
+  port: 443
+  cipher: chacha20-ietf-poly1305
+  password: REPLACE_BACKUP_PASSWORD
+- name: dmit-us
+  type: vless
+  server: REPLACE_SERVER
+  port: 443
+  uuid: REPLACE_UUID
+  tls: true
+  udp: true
+  servername: REPLACE_SERVERNAME
+  client-fingerprint: chrome
+  reality-opts:
+    public-key: REPLACE_PUBLIC_KEY
+    short-id: REPLACE_SHORT_ID
+  network: tcp
+  dialer-proxy: airport-us
+proxy-groups:
+- name: airport-us
+  type: fallback
+  proxies:
+  - airport-us-experimental
+  - airport-us-backup
+  url: https://www.gstatic.com/generate_204
+  interval: 60
+  timeout: 5000
+  lazy: false
 dns:
   enable: true
   listen: 0.0.0.0:53
@@ -36,52 +52,41 @@ dns:
   prefer-h3: false
   use-hosts: false
   use-system-hosts: false
+  # Plain UDP resolvers: DoH endpoints such as 1.1.1.1 are unreachable from
+  # mainland China, and this bootstrap path must work before any tunnel exists.
   default-nameserver:
-    - https://1.1.1.1/dns-query
-  # Bootstrap only: use the gateway system resolver for proxy server names.
-  # Other workload DNS below uses DoH through the residential chain.
+  - 223.5.5.5
+  - 119.29.29.29
+  # Bootstrap airport hostnames using resolvers reachable from the host network.
   proxy-server-nameserver:
-    - system
-  # Direct domains use the Docker system resolver backed by the host DNS.
+  - https://dns.alidns.com/dns-query
+  - https://doh.pub/dns-query
   nameserver-policy:
-    '+.weimob.com': system
-    '+.hsmob.com': system
-    '+.weimobqa.com': system
-    '+.weimobpl.com': system
-    '+.tencent.com': system
-    '+.myqcloud.com': system
-    'herdr.dev': system
-  # Other workload DNS uses the full chain; no direct fallback.
+    +.corp.example.com: system
+    +.internal.example.com: system
+    +.qa.example.com: system
+    +.tencent.com: system
   nameserver:
-    - 'https://1.1.1.1/dns-query#residential'
-
-# These fixed inbound tunnels are the ONLY intended DIRECT traffic to dev.
-# Host ports are bound to 127.0.0.1 by Compose.
+  - https://1.1.1.1/dns-query#dmit-us
 tunnels:
-  - network: [tcp]
-    address: 0.0.0.0:10022
-    target: 172.30.0.10:22
-    proxy: DIRECT
-  - network: [tcp]
-    address: 0.0.0.0:15901
-    target: 172.30.0.10:5901
-    proxy: DIRECT
-  - network: [tcp]
-    address: 0.0.0.0:16080
-    target: 172.30.0.10:6080
-    proxy: DIRECT
-
+- network:
+  - tcp
+  address: 0.0.0.0:10022
+  target: 172.30.0.10:22
+  proxy: DIRECT
+- network:
+  - tcp
+  address: 0.0.0.0:15901
+  target: 172.30.0.10:5901
+  proxy: DIRECT
+- network:
+  - tcp
+  address: 0.0.0.0:16080
+  target: 172.30.0.10:6080
+  proxy: DIRECT
 rules:
-  # Direct domains (including the apex) use the host network via Docker egress.
-  - DOMAIN-SUFFIX,weimob.com,DIRECT
-  - DOMAIN-SUFFIX,hsmob.com,DIRECT
-  - DOMAIN-SUFFIX,weimobqa.com,DIRECT
-  - DOMAIN-SUFFIX,weimobpl.com,DIRECT
-  - DOMAIN-SUFFIX,tencent.com,DIRECT
-  - DOMAIN,herdr.dev,DIRECT
-  - DOMAIN-SUFFIX,myqcloud.com,DIRECT
-  - DOMAIN-SUFFIX,pythonhosted.org,airport
-  - DOMAIN,pypi.org,airport
-  - DOMAIN-SUFFIX,anthropic.com,residential
-  - DOMAIN-SUFFIX,datadoghq.com,residential
-  - MATCH,residential
+- DOMAIN-SUFFIX,corp.example.com,DIRECT
+- DOMAIN-SUFFIX,internal.example.com,DIRECT
+- DOMAIN-SUFFIX,qa.example.com,DIRECT
+- DOMAIN-SUFFIX,tencent.com,DIRECT
+- MATCH,dmit-us

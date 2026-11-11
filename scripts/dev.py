@@ -15,7 +15,8 @@ STATE = ROOT / ".runtime"
 BASE = ROOT / "compose.yaml"
 OVERLAY = STATE / "compose.dependencies.json"
 WORKSPACE_TARGET = "/home/dev/workspace"
-HELPER_IMAGE = "metacubex/mihomo:latest"
+PERSONAL_TARGET = "/home/dev/personal"
+HELPER_IMAGE = "metacubex/mihomo:v1.19.19"
 
 
 def run(args, *, capture=False, input=None):
@@ -111,7 +112,7 @@ def scan(workspace, rules):
     return [{"path": p, "reason": selected[p]} for p in sorted(paths)], sorted(symlinks)
 
 
-def make_plan(workspace, entries, project, architecture):
+def make_plan(workspace, entries, project, architecture, target=WORKSPACE_TARGET):
     identity = hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()[:16]
     namespace = f"linux-{architecture}/{identity}"
     mounts = []
@@ -119,7 +120,7 @@ def make_plan(workspace, entries, project, architecture):
         key = hashlib.sha256(entry["path"].encode()).hexdigest()
         entry["subpath"] = f"{namespace}/projects/{key}"
         mounts.append({"type": "volume", "source": "dependencies",
-                       "target": WORKSPACE_TARGET + "/" + entry["path"],
+                       "target": target + "/" + entry["path"],
                        "volume": {"nocopy": True, "subpath": entry["subpath"]}})
     cache = namespace + "/cache"
     mounts.append({"type": "volume", "source": "dependencies",
@@ -137,36 +138,59 @@ def make_plan(workspace, entries, project, architecture):
 def generate():
     model = json.loads(compose("config", "--format", "json", capture=True))
     mounts = model["services"]["dev"]["volumes"]
-    workspace_mount = next(m for m in mounts if m["target"] == WORKSPACE_TARGET)
-    if workspace_mount["type"] != "bind":
-        raise ValueError("dev workspace must be a bind mount")
-    workspace = Path(workspace_mount["source"]).resolve(strict=True)
-    rules = json.loads((ROOT / "dependency-rules.json").read_text())
+    workspace_mounts = [next(m for m in mounts if m["target"] == WORKSPACE_TARGET)]
+    workspace_mounts += [m for m in mounts if m["target"] == PERSONAL_TARGET]
     home_mount = next((m for m in mounts if m["target"] == "/home/dev"), None)
-    if home_mount:
-        if home_mount["type"] != "bind":
-            raise ValueError("dev home must be a bind mount")
-        home = Path(home_mount["source"]).resolve()
-        if home == workspace or home in workspace.parents:
-            raise ValueError("dev home must not contain the shared workspace")
-        if workspace in home.parents:
-            rules["exclude_paths"].append(home.relative_to(workspace).as_posix())
-    # Identity directories can be root-only on Linux and contain no project dependencies.
-    for service in model["services"].values():
-        for mount in service.get("volumes", []):
-            if mount["type"] == "bind" and mount["target"] in {
-                    "/var/lib/cc-runtime/ssh", "/var/lib/tailscale"}:
-                identity = Path(mount["source"]).resolve()
-                if identity == workspace or identity in workspace.parents:
-                    raise ValueError("Identity storage must not contain the shared workspace")
-                if workspace in identity.parents:
-                    rules["exclude_paths"].append(identity.relative_to(workspace).as_posix())
-    entries, symlinks = scan(workspace, rules)
+    if home_mount and home_mount["type"] != "bind":
+        raise ValueError("dev home must be a bind mount")
     architecture = run(["docker", "info", "--format", "{{.Architecture}}"], capture=True).strip()
     if not architecture or not all(c.isalnum() or c in "_-" for c in architecture):
         raise ValueError("Unexpected Docker server architecture")
-    overlay, plan = make_plan(workspace, entries, model["name"], architecture)
-    plan["skipped_symlinks"] = symlinks
+    overlay, plan = None, None
+    workspaces = []
+    for mount in workspace_mounts:
+        if mount["type"] != "bind":
+            raise ValueError("dev workspace must be a bind mount")
+        workspace = Path(mount["source"]).resolve(strict=True)
+        if any(workspace == previous or workspace in previous.parents or previous in workspace.parents
+               for previous in (Path(w["source"]) for w in workspaces)):
+            raise ValueError("Shared workspaces must not overlap")
+        rules = json.loads((ROOT / "dependency-rules.json").read_text())
+        local_rules = ROOT / "dependency-rules.local.json"
+        if local_rules.exists():
+            rules["exclude_paths"].extend(json.loads(local_rules.read_text()).get("exclude_paths", []))
+        if home_mount:
+            home = Path(home_mount["source"]).resolve()
+            if home == workspace or home in workspace.parents:
+                raise ValueError("dev home must not contain the shared workspace")
+            if workspace in home.parents:
+                rules["exclude_paths"].append(home.relative_to(workspace).as_posix())
+        # Identity directories can be root-only on Linux and contain no project dependencies.
+        for service in model["services"].values():
+            for volume_mount in service.get("volumes", []):
+                if volume_mount["type"] == "bind" and volume_mount["target"] in {
+                        "/var/lib/cc-runtime/ssh", "/var/lib/tailscale"}:
+                    identity = Path(volume_mount["source"]).resolve()
+                    if identity == workspace or identity in workspace.parents:
+                        raise ValueError("Identity storage must not contain the shared workspace")
+                    if workspace in identity.parents:
+                        rules["exclude_paths"].append(identity.relative_to(workspace).as_posix())
+        entries, symlinks = scan(workspace, rules)
+        current_overlay, current_plan = make_plan(workspace, entries, model["name"], architecture,
+                                                 target=mount["target"])
+        workspaces.append({"source": str(workspace), "target": mount["target"],
+                           "entries": list(entries), "skipped_symlinks": symlinks})
+        if overlay is None:
+            overlay, plan = current_overlay, current_plan
+            plan["skipped_symlinks"] = symlinks
+        else:
+            # Keep the original shared cache and dependency namespaces unchanged.
+            overlay["services"]["dev"]["volumes"].extend(
+                m for m in current_overlay["services"]["dev"]["volumes"]
+                if m["target"] != "/home/dev/.cache")
+            plan["entries"].extend(entries)
+        print(f"Scanned {workspace}: {len(entries)} isolated directories", flush=True)
+    plan["workspaces"] = workspaces
     STATE.mkdir(exist_ok=True)
     # Compose interpolates '$' in values, even in JSON. Escape literal path characters.
     encoded = json.dumps(overlay, ensure_ascii=False, indent=2).replace("$", "$$")
@@ -175,9 +199,10 @@ def generate():
     temporary.replace(OVERLAY)
     (STATE / "dependencies.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
     compose("config", "--quiet", overlay=True)
-    print(f"Scanned {workspace}: {len(entries)} isolated directories, one volume: {plan['volume']}", flush=True)
-    if symlinks:
-        print(f"Skipped {len(symlinks)} symlink directories; see .runtime/dependencies.json", flush=True)
+    print(f"Total: {len(plan['entries'])} isolated directories, one volume: {plan['volume']}", flush=True)
+    skipped = sum(len(w["skipped_symlinks"]) for w in workspaces)
+    if skipped:
+        print(f"Skipped {skipped} symlink directories; see .runtime/dependencies.json", flush=True)
     return model, plan
 
 
@@ -199,6 +224,18 @@ fi
     run(["docker", "run", "--rm", "--network", "none", "--user", "0:0",
          "--mount", f"type=bind,source={home},target=/persistent-home",
          "--entrypoint", "/bin/sh", image, "-c", script, "init", str(uid), str(gid)])
+
+
+def initialize_terminal(image, home, uid, gid):
+    """Install bundled terminal definitions even when the home already exists."""
+    source = ROOT / "shell" / "xterm-ghostty.terminfo"
+    run(["docker", "run", "--rm", "--network", "none", "--user", f"{uid}:{gid}",
+         "--env", "HOME=/home/dev", "--workdir", "/home/dev",
+         "--mount", f"type=bind,source={home},target=/home/dev",
+         "--mount", f"type=bind,source={source},target=/tmp/cc-runtime.terminfo,readonly",
+         "--entrypoint", "/bin/sh", image, "-ec",
+         "tic -x -o /home/dev/.terminfo /tmp/cc-runtime.terminfo; "
+         "infocmp -x xterm-ghostty >/dev/null"])
 
 
 def initialize(plan, uid, gid):
@@ -316,6 +353,7 @@ def main():
                            if m["target"] == "/home/dev"), None)
         if home_mount:
             initialize_home(image, Path(home_mount["source"]).resolve(), *map(int, ids))
+            initialize_terminal(image, Path(home_mount["source"]).resolve(), *map(int, ids))
         initialize_identity(model, image)
         initialize(plan, *map(int, ids))
         print("Dependency subdirectories initialized; host dependencies were not copied.", flush=True)

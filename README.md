@@ -1,6 +1,6 @@
 # cc-runtime
 
-使用 Docker Compose 运行开发环境，并通过独立的 Mihomo 网关访问外网。适用于 macOS OrbStack 和 Linux Docker Engine，不依赖 OrbStack 的全局代理设置。
+使用 Docker Compose 运行开发环境，并通过独立的 Mihomo 网关，经机场美国节点故障切换组连接 DMIT US（VLESS Reality）出口。适用于 macOS Docker Desktop 和 Linux Docker Engine。
 
 ## 网络结构
 
@@ -11,21 +11,21 @@ flowchart LR
     T -->|SSH TCP 22| D
     P -->|入站：私网直连| D[dev: 开发容器]
     D -->|出站：私网默认网关| P
-    P --> A[机场节点]
-    A --> R[家宽 HTTP 代理]
-    R --> W[外网]
+    P --> F[机场美国节点: fallback]
+    F --> A[DMIT US: VLESS Reality]
+    A --> W[外网]
 ```
 
-三个常驻容器拥有独立的网络命名空间：
+四个常驻服务容器使用三个网络命名空间：`dev` 与 `dev-network-init` 共享一个，`proxy` 和 `tailscale` 各自独立。
 
 | 服务 | 网络 | 职责 |
 |---|---|---|
 | `dev` | 仅私网，`172.30.0.10` | 开发工具、SSH 和远程桌面 |
 | `proxy` | 私网 `172.30.0.2` + 出口网络 | TCP 透明代理、DNS、开发服务入站转发 |
 | `tailscale` | 私网 `172.30.0.3` + 出口网络 | Tailscale 接入，仅转发 SSH 到 `dev:22` |
-| `dev-network-init` | 临时共享 `dev` 的网络命名空间 | 设置默认路由和 DNS 防绕过规则，然后退出 |
+| `dev-network-init` | 持有私网 `172.30.0.10`，供 `dev` 加入 | 配置并持续检查默认路由和 DNS 防绕过规则 |
 
-`dev` 不设置代理环境变量，也不共享 `proxy` 的网络、配置和凭据。只有临时初始化容器获得 `NET_ADMIN`；开发容器不保留该权限，并移除了 `NET_RAW`。
+`dev` 不设置代理环境变量，也不共享 `proxy` 的网络、配置和凭据。只有网络守护容器和代理容器获得 `NET_ADMIN`；开发容器不保留该权限，并移除了 `NET_RAW`。
 
 ## 文件
 
@@ -34,10 +34,10 @@ compose.yaml                    服务、网络、权限、端口和挂载
 Dockerfile                      开发镜像
 entrypoint.sh                   初始化开发服务
 proxy/config.example.yaml       Mihomo 配置模板
-proxy/config.yaml               自行填写的实际配置，不提交 Git
+proxy/config.yaml               机场美国节点与 DMIT 链式配置，不提交 Git
 proxy/resolv.conf               开发容器使用网关 DNS
-scripts/proxy-entrypoint.sh     网关防火墙初始化与 Mihomo 启动
-scripts/dev-network-init.sh     开发容器网络初始化，完成后退出
+scripts/containers/proxy-entrypoint.sh     网关防火墙初始化与 Mihomo 启动
+scripts/containers/dev-network-init.sh     开发网络初始化、健康检查和持续修复
 scripts/dev.py                  扫描依赖、初始化总卷、管理 Compose
 tailscale/config/serve.json      Tailscale 私网 SSH 转发配置
 tailscale/state/                Tailscale 登录状态，不提交 Git、不进入镜像构建
@@ -48,7 +48,7 @@ dev-runtime/home/                       dev 家目录的宿主机存储，不提
 dev-runtime/ssh-host-keys/              SSH 主机密钥的宿主机存储，不提交 Git、不进入镜像构建
 ```
 
-`proxy` 和临时辅助容器直接使用 `metacubex/mihomo:latest`，不构建代理镜像。该镜像已包含脚本使用的 `ip`、`iptables`、`nc` 和 shell。这里使用 TCP REDIRECT，不需要 TUN 或 `/dev/net/tun`。
+`proxy` 和网络守护容器直接使用 `metacubex/mihomo:v1.19.19`，不构建代理镜像。该镜像已包含脚本使用的 `ip`、`iptables`、`nc` 和 shell。这里使用 TCP REDIRECT，不需要 TUN 或 `/dev/net/tun`。
 
 ## 启动
 
@@ -59,13 +59,15 @@ dev-runtime/ssh-host-keys/              SSH 主机密钥的宿主机存储，不
    chmod 600 proxy/config.yaml
    ```
 
-2. 编辑 `proxy/config.yaml`：
+2. 编辑 `proxy/config.yaml`：从 Clash 订阅复制完整的美国节点，保留协议参数，并将名称依次列入 `airport-us` 的 `proxies`。实验性节点放在第一位，其他美国节点作为备用。填写 `dmit-us` 的服务器、UUID、SNI、Reality 公钥和 short ID，保留 `dialer-proxy: airport-us`。配置是原生 Mihomo YAML，不会展开环境变量。
 
-   - 将 `airport` 替换为 Clash 订阅中的一个完整节点，保留名称 `airport` 和节点全部协议参数。不导入机场的分流规则。
-   - 填写 `residential` 的家宽 HTTP 代理地址、端口和账号密码，保留 `dialer-proxy: airport`。
-   - 如果家宽提供的是 HTTPS 代理，按服务商要求增加 `tls: true`。
+   `airport-us` 使用 `fallback`，每 60 秒检查一次节点，单次超时 5 秒，`lazy: false` 保证闲置时也检查。新连接使用列表中第一个可用节点，优先节点恢复后会重新优先使用；已有连接不能无缝迁移，断线后客户端需要重连。该检查验证机场节点访问检测网址的能力，不等于逐条验证机场到 DMIT 的链路。DMIT 仍是单个最终出口，DMIT 自身故障不在这个组的容灾范围内。
 
-   这是原生 Mihomo YAML，不会自动替换 `${变量}`。脚本会拒绝启动仍包含模板占位符的配置。
+   节点域名由 `proxy-server-nameserver` 使用阿里 DoH（`https://dns.alidns.com/dns-query`）解析；业务 DNS 继续通过 DMIT 出口查询。不同 DNS 对机场域名的结果可能不同，排查时需分别验证节点域名解析和 TCP 连接。
+
+   美国节点均不可用时不会回退到直连 DMIT 或机场直接出口。默认规则和业务 DNS 仍走 `dmit-us`，原有指定域名的 `DIRECT` 规则保留。订阅节点是本地配置快照，机场更换节点或凭据后需同步更新 `proxy/config.yaml`。
+
+   Docker Desktop 的代理设置使用手动模式，HTTP/HTTPS 地址留空；容器代理同样直连。不要继承本机系统 Clash 代理，否则 Reality 连接可能被透明代理截获。
 
 3. 复制环境变量示例，并在 `.env` 中填写 `PASSWORD`，作为开发用户的 SSH/VNC 密码：
 
@@ -87,7 +89,7 @@ dev-runtime/ssh-host-keys/              SSH 主机密钥的宿主机存储，不
    python3 scripts/dev.py compose logs proxy dev-network-init dev
    ```
 
-`dev-network-init` 正常状态是 `Exited (0)`，它不是常驻服务。`dev` 正常启动开发服务，不等待路由初始化；默认路由设置完成前，启动阶段的外网请求可能失败，需要重试。网关健康检查只确认本地监听端口，不能证明真实机场和家宽代理连通。
+`dev-network-init` 正常状态是 `Up (healthy)`，它是常驻网络守护服务。Compose 启动 `dev` 前会等待路由和 DNS 防绕过规则就绪。网关健康检查只确认本地监听端口，不能证明 DMIT 出口连通。
 
 开发镜像构建时的下载使用 Docker 构建网络，不在此运行时代理链内。
 
@@ -101,7 +103,7 @@ dev-runtime/ssh-host-keys/              SSH 主机密钥的宿主机存储，不
 | VNC 客户端 | `127.0.0.1:5901` | `172.30.0.10:5901` |
 | 浏览器 noVNC | `http://127.0.0.1:6080/vnc.html` | `172.30.0.10:6080` |
 
-这些连接由 Mihomo 的固定 `DIRECT` tunnel 在 Docker 私网转发，**不经过机场或家宽代理**。开发工作区直接绑定宿主机 `/Users/zeke/workspace` 到容器 `/home/dev/workspace`，两端文件修改会互相可见。迁移到 Linux 时需修改宿主机路径并确保开发用户具有写权限；入口脚本不会递归修改已有工作区的所有者。
+这些连接由 Mihomo 的固定 `DIRECT` tunnel 在 Docker 私网转发，**不经过 DMIT**。开发工作区直接绑定宿主机 `/absolute/path/to/workspace` 到容器 `/home/dev/workspace`，两端文件修改会互相可见。迁移到 Linux 时需修改宿主机路径并确保开发用户具有写权限；入口脚本不会递归修改已有工作区的所有者。
 
 ### 通过 Tailscale 远程 SSH
 
@@ -154,13 +156,50 @@ SSH 密钥目录和 Tailscale 状态目录由启动脚本初始化，普通 `dow
 python3 scripts/dev.py compose up -d --no-deps --force-recreate proxy
 ```
 
+### 个人工作区
+
+在 `.env` 设置 `PERSONAL_WORKSPACE_PATH=/absolute/path/to/personal/projects`，映射到 `/home/dev/personal`；公司工作区继续由 `WORKSPACE_PATH` 映射到 `/home/dev/workspace`。两个宿主机目录必须已存在且互不嵌套。
+
+通过 `python3 scripts/dev.py up --no-pull` 应用挂载。两处源码都双向共享；扫描器对两个工作区分别应用 `dependency-rules.json`，使用宿主机根路径生成不同的依赖子目录，避免同名项目混用 Linux 依赖。原公司项目的依赖位置和公共工具缓存保持不变，仍只使用一个依赖总卷。规则中的相对包含、排除路径分别相对于各工作区根目录。
+
+本机依赖目录若使用指向宿主机绝对路径的符号链接，可在不提交 Git 的 `dependency-rules.local.json` 中配置 `exclude_paths`；该文件的排除项会追加到公共规则。
+
+个人项目首次使用需在容器中安装 Linux 依赖。新增项目或新增未被扫描覆盖的依赖目录后，重新运行 `up --no-pull` 更新挂载。扫描结果记录在 `.runtime/dependencies.json` 的 `workspaces` 字段。
+
+### Ghostty SSH 终端显示
+
+Ghostty 连接时传入 `TERM=xterm-ghostty`。容器缺少对应 terminfo 时，会出现光标移动、删除和重绘异常，容易被误认为中文编码乱码。
+
+仓库内 `shell/xterm-ghostty.terminfo` 保存可移植的终端定义源文件。镜像构建时安装；`python3 scripts/dev.py up` 和 `prepare` 也会每次编译到 `dev-home/.terminfo`，因此使用已有镜像、已有家目录或清空家目录重新初始化都能自动补齐，无需依赖宿主机安装 Ghostty。
+
+已有环境可运行 `python3 scripts/dev.py prepare` 修复，无需重启容器。随后退出并重新 SSH 连接；已显示异常的窗口可先执行 `reset`。验证命令：
+
+```bash
+ssh cc-runtime 'infocmp -x xterm-ghostty >/dev/null && TERM=xterm-ghostty tput colors'
+```
+
+### Herdr 状态持久化
+
+Herdr 的 `~/.config/herdr` 随 `dev-runtime/home/` 持久化，保存配置、`session.json` 和 `session-snapshots/`。只有 `/run/herdr` 使用 tmpfs；入口脚本初始化为 dev 所有、权限 700，通过 `HERDR_SOCKET_PATH=/run/herdr/herdr.sock` 指定 socket，并写入 `/etc/environment` 供 SSH 登录使用。
+
+不要将整个 `~/.config/herdr` 挂成 tmpfs，否则配置和历史会在重建后丢失。重建会终止运行中的进程；持久化会话数据不等于保留运行中的 Agent，重新登录后需要打开 Herdr 并按需恢复 Agent 会话。
+
+### CleanShot 截图路径共享
+
+当前 Mac 的 `${CLEANSHOT_MEDIA_PATH}` 以相同绝对路径只读挂载到 dev。通过 SSH 在容器内使用 Agent 时，可直接粘贴 CleanShot 图片的完整本机路径，无需复制文件或改写路径；路径含空格，在 Shell 中使用时需加引号。
+
+挂载覆盖整个媒体目录，新截图的子目录会自动可见。文件仍由宿主机管理，CleanShot 清理截图后容器也无法再读取。此挂载不传输剪贴板内容，也不共享其他电脑的截图。换用其他 Mac 用户时应同步修改 `source` 和 `target`；不使用 CleanShot 的主机可移除此挂载。
+
+修改后通过 `python3 scripts/dev.py compose up -d --no-deps --force-recreate dev` 应用。该操作保留生成的依赖挂载和持久化数据，但会断开现有 SSH 会话。
+
 ### 持久化 dev 家目录
 
 当前目录下的 `dev-runtime/home/` 绑定到容器 `/home/dev`。Shell 配置、Claude 登录状态、SSH 文件和用户安装的工具等会保留在这里，容器重建后仍然可用。
 
 ```text
-./dev-runtime/home                    → /home/dev
-/Users/zeke/workspace          → /home/dev/workspace（单独覆盖挂载）
+./dev-runtime/home             → /home/dev
+/absolute/path/to/workspace    → /home/dev/workspace（单独覆盖挂载）
+/absolute/path/to/personal/projects           → /home/dev/personal（单独覆盖挂载）
 依赖总卷的缓存子目录          → /home/dev/.cache（单独覆盖挂载）
 ```
 
@@ -174,7 +213,7 @@ Playwright 的系统依赖由 root 安装，Chromium 由 dev 下载到 `/home/de
 
 ### 单卷隔离依赖与构建产物
 
-源码继续共享 `/Users/zeke/workspace`。启动脚本扫描项目，为依赖和构建产物生成子目录挂载，全部存放在 **一个外部 Docker 卷** 中：默认名为 `cc-runtime_dependencies`，前缀跟随 Compose 项目名。
+源码继续共享 `/absolute/path/to/workspace`。启动脚本扫描项目，为依赖和构建产物生成子目录挂载，全部存放在 **一个外部 Docker 卷** 中：默认名为 `cc-runtime_dependencies`，前缀跟随 Compose 项目名。
 
 ```text
 Mac workspace/my-project/src       ← 共享 → dev workspace/my-project/src
@@ -252,39 +291,41 @@ python3 scripts/dev.py compose down
 
 ## 出站与 DNS 策略
 
-- `weimob.com`、`hsmob.com`、`weimobqa.com`、`weimobpl.com`、`tencent.com` 及其所有子域名：通过 `DOMAIN-SUFFIX` 优先匹配 `DIRECT`，经 Docker 出口使用宿主机网络访问目标；DNS 通过 `nameserver-policy` 使用网关系统解析器（Docker DNS 转发到宿主机侧）。宿主机需已连上公司网络或 VPN，Docker 出口也需能访问相应内网。新增直连域名时，同时补充这两处配置。
-- 其他外网 TCP 连接：`dev → proxy → airport → residential → 目标`。
-- 普通 UDP 和 ICMP：不转发。HTTP CONNECT 家宽代理不能承载普通 UDP；QUIC/HTTP3、UDP 工具及部分实时音视频因此不可用，支持回退的客户端可使用 TCP。
-- DNS：允许 `dev` 向网关发送 UDP/TCP DNS；上述直连域名使用系统解析器，其他域名通过完整代理链访问 DoH。
+- `corp.example.com`、`internal.example.com`、`qa.example.com`、`tencent.com` 及其所有子域名：通过 `DOMAIN-SUFFIX` 优先匹配 `DIRECT`，经 Docker 出口使用宿主机网络访问目标；DNS 通过 `nameserver-policy` 使用网关系统解析器（Docker DNS 转发到宿主机侧）。宿主机需已连上公司网络或 VPN，Docker 出口也需能访问相应内网。新增直连域名时，同时补充这两处配置。
+- 其他外网 TCP 连接：`dev → proxy → DMIT US → 目标`。
+- 普通 UDP 和 ICMP：不转发。网关仅接管 TCP 和 DNS；QUIC/HTTP3、UDP 工具及部分实时音视频因此不可用，支持回退的客户端可使用 TCP。
+- DNS：允许 `dev` 向网关发送 UDP/TCP DNS；上述直连域名使用系统解析器，其他域名通过 DMIT 访问 DoH。
 - 发往外部 DNS 地址的 53 端口流量也会在网关被接管；`dev` 的 Docker 内置 DNS 地址 `127.0.0.11` 被阻断，避免绕过网关。容器服务名解析因此不依赖 Docker DNS，内部转发使用固定 IP。
-- 代理节点域名的启动解析：模板使用网关的系统解析器（`proxy-server-nameserver: [system]`），仅用于建立代理链。部分机场域名在公共解析器下返回不同地址，因此不强制使用 Cloudflare 做节点启动解析。除上述直连域名外，业务 DNS 仍经家宽代理访问 DoH，不设置直连回退。
+- 节点服务器地址使用网关系统解析器解析；其余业务 DNS 按上述策略处理，不设置直连回退。
 - IPv6：当前部署禁用。
 
 上述域名明确配置直连，其他业务没有直连回退。网关关闭内核 IP 转发并设置 `FORWARD DROP`，业务 TCP 在网关本地由 Mihomo 接收、重新建立代理连接；代理停止或上游不可用时应失败，而不是直连外网。
 
-网关的固定开发服务入站 tunnel，以及节点域名启动解析，另有明确的本地转发/启动路径。
+网关的固定开发服务入站 tunnel 使用私网直连。专用网桥关闭 IP 地址分配（`inhibit_ipv4`）和地址伪装，dev 默认路由指向 proxy；不使用会丢弃公网目的地址报文的 `internal: true`。proxy 的默认出口优先使用 outbound 网络。
 
 ## 重启与修改
 
-修改节点或家宽配置后：
+修改 DMIT 节点或网关配置后：
 
 ```bash
 python3 scripts/dev.py compose restart proxy
 ```
 
-更新 Compose、镜像或重建开发容器时，推荐一起重建关联服务，确保辅助容器加入当前 `dev` 的网络命名空间：
+更新 Compose、镜像或重建开发容器时，推荐一起重建关联服务，确保 `dev` 加入当前网络守护容器的网络命名空间：
 
 ```bash
 python3 scripts/dev.py up
 ```
 
-如果网络初始化失败、开发容器缺少默认路由，可以重新执行：
+网络守护容器每两秒检查并修复路由和 DNS 规则。开发容器单独重启不会丢失路由；Docker 重启后网络守护进程会重新初始化。需要手动触发时：
 
 ```bash
-python3 scripts/dev.py compose run --rm dev-network-init
+python3 scripts/dev.py compose exec dev-network-init /bin/sh /scripts/dev-network-init.sh --once
 ```
 
 普通停止使用 `python3 scripts/dev.py compose down`，宿主机工作区、`dev-runtime/home` 和外部依赖总卷均保留。原来的 `workspace` 命名卷不会自动迁移到本地目录，也不会被此次配置修改删除。
+
+不要单独用 `docker restart` 重启网络守护容器，否则运行中的 `dev` 可能仍留在旧网络命名空间。需要重建网络时使用 `python3 scripts/dev.py up`，一并重建关联服务。
 
 网段暂固定为 `172.30.0.0/24`。如与宿主机、VPN 或已有 Docker 网络冲突，需要同步修改 Compose、两个初始化脚本、`proxy/resolv.conf` 和 Mihomo tunnel 目标。
 
@@ -292,24 +333,20 @@ python3 scripts/dev.py compose run --rm dev-network-init
 
 `dev` 能看到自己的 `eth0`、私网 IP 和默认网关 `172.30.0.2`，看不到 `proxy` 的网络规则或代理进程。默认路由和 DNS 地址本身仍可见；不能保证程序通过出口 IP、延迟或其他网络行为无法推断存在代理。
 
-当前仓库位于宿主机 workspace 内，挂载整个工作区也会让 `dev` 读到仓库及其中的 `proxy/config.yaml`、`.env` 等文件。因此，当前挂载方式不再保证代理配置与凭据不可见；如需要这个边界，必须将部署配置移到共享工作区外，或对相应路径另行覆盖隔离。
+当前部署目录 `/absolute/path/to/cc-runtime` 位于共享工作区 `/absolute/path/to/workspace` 之外，代理配置和 `.env` 不随工作区挂载到 dev。
 
 开发用户具有免密 sudo，但容器不持有 `NET_ADMIN`，不能仅通过 sudo 修改网络管理规则。不要给 `dev` 增加特权模式、Docker socket、宿主机网络或代理配置挂载，否则会改变隔离边界。
 
 ## 验证状态
 
-已在本机 OrbStack 上使用隔离的测试容器和本地模拟两级 HTTP 代理验证：
+当前部署使用单个 DMIT US（VLESS Reality）节点，Docker Desktop 全局及容器代理均已清空。验证出口时在 dev 中执行：
 
-- TCP 透明转发依次经过两个代理。
-- 业务 DNS 经完整代理链访问模拟 DoH 服务。
-- 网关固定入站 tunnel 能访问开发容器的私网服务。
-- 普通 UDP 和 Docker 内置 DNS 绕过路径被阻断。
-- 代理暂停及网关停止时，外网请求失败，没有直连回退。
-- Compose 解析、shell 语法及 Mihomo 配置模板校验通过。
+```bash
+docker exec cc-runtime-dev-1 curl --noproxy '*' -4fsS https://api.ipify.org
+docker exec cc-runtime-dev-1 curl --noproxy '*' -4fsS https://ipinfo.io/country
+```
 
-测试不使用真实机场、家宽账号，也不代表开发镜像完整构建和桌面服务已验收。填入真实配置后，还需检查出口 IP、实际 DNS、SSH/VNC，并在目标 Linux Docker Engine 上复验。若 OrbStack 已启用自身的全局代理，验证实际出口时需要考虑这层额外代理的影响。
-
-参考：[Mihomo 链式代理](https://wiki.metacubex.one/en/config/proxies/dialer-proxy/)、[DNS 配置](https://wiki.metacubex.one/en/config/dns/)、[Docker Compose 网络](https://docs.docker.com/compose/how-tos/networking/)。
+预期出口为 `<YOUR_EXIT_IP>`，国家为 `US`。健康检查只检查网关监听端口，以上实际请求才验证完整出口。
 
 依赖隔离新增验证：扫描规则不会误屏蔽 Rust `src/bin` 等源码；可识别自定义虚拟环境名；一个卷通过 Compose 子目录挂载隔离多个依赖路径；容器写入不改变宿主机依赖，源码仍双向共享；重建后依赖保留；Python 字节码写入卷内。测试命令：
 
@@ -326,4 +363,10 @@ CC_RUNTIME_DOCKER_TEST=1 python3 -m unittest discover -s tests -v
 
 ```bash
 CC_RUNTIME_DOCKER_TEST=1 python3 -m unittest discover -s tests -p test_identity.py -v
+```
+
+网络生命周期回归测试（使用临时容器和独立网络，不使用代理凭据）：
+
+```bash
+CC_RUNTIME_DOCKER_TEST=1 python3 -m unittest discover -s tests -p test_network.py -v
 ```

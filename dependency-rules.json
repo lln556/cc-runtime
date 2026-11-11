@@ -1,21 +1,115 @@
 {
   "directory_names": [
-    "node_modules", ".venv", ".next", ".nuxt", ".output", ".svelte-kit",
-    ".turbo", ".parcel-cache", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ".tox", ".nox", ".gradle", ".dart_tool", ".angular"
+    "node_modules",
+    ".venv",
+    ".next",
+    ".nuxt",
+    ".output",
+    ".svelte-kit",
+    ".turbo",
+    ".parcel-cache",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    ".nox",
+    ".gradle",
+    ".dart_tool",
+    ".angular"
   ],
   "project_rules": [
-    {"markers": ["package.json"], "directories": ["node_modules"]},
-    {"markers": ["pyproject.toml", "requirements*.txt", "setup.py", "Pipfile"], "directories": [".venv"]},
-    {"markers": ["Cargo.toml", "pom.xml"], "directories": ["target"]},
-    {"markers": ["build.gradle", "build.gradle.kts"], "directories": ["build", ".gradle"]},
-    {"markers": ["pubspec.yaml"], "directories": ["build", ".dart_tool"]},
-    {"markers": ["*.csproj", "*.fsproj"], "directories": ["bin", "obj"]},
-    {"markers": ["next.config.*"], "directories": [".next"]},
-    {"markers": ["nuxt.config.*"], "directories": [".nuxt", ".output"]},
-    {"markers": ["svelte.config.*"], "directories": [".svelte-kit"]}
+    {
+      "markers": [
+        "package.json"
+      ],
+      "directories": [
+        "node_modules"
+      ]
+    },
+    {
+      "markers": [
+        "pyproject.toml",
+        "requirements*.txt",
+        "setup.py",
+        "Pipfile"
+      ],
+      "directories": [
+        ".venv"
+      ]
+    },
+    {
+      "markers": [
+        "Cargo.toml",
+        "pom.xml"
+      ],
+      "directories": [
+        "target"
+      ]
+    },
+    {
+      "markers": [
+        "build.gradle",
+        "build.gradle.kts"
+      ],
+      "directories": [
+        "build",
+        ".gradle"
+      ]
+    },
+    {
+      "markers": [
+        "pubspec.yaml"
+      ],
+      "directories": [
+        "build",
+        ".dart_tool"
+      ]
+    },
+    {
+      "markers": [
+        "*.csproj",
+        "*.fsproj"
+      ],
+      "directories": [
+        "bin",
+        "obj"
+      ]
+    },
+    {
+      "markers": [
+        "next.config.*"
+      ],
+      "directories": [
+        ".next"
+      ]
+    },
+    {
+      "markers": [
+        "nuxt.config.*"
+      ],
+      "directories": [
+        ".nuxt",
+        ".output"
+      ]
+    },
+    {
+      "markers": [
+        "svelte.config.*"
+      ],
+      "directories": [
+        ".svelte-kit"
+      ]
+    }
   ],
   "include_paths": [],
   "exclude_paths": [],
-  "skip_directory_names": [".git", ".hg", ".svn", ".idea", ".vscode", "__pycache__", ".runtime"]
+  "skip_directory_names": [
+    ".git",
+    ".hg",
+    ".svn",
+    ".idea",
+    ".vscode",
+    "__pycache__",
+    ".runtime"
+  ]
 }

@@ -4,14 +4,17 @@ services:
     entrypoint: [/bin/bash, /usr/local/bin/entrypoint.sh]
     restart: unless-stopped
     cap_drop: [NET_RAW]
-    sysctls:
-      net.ipv6.conf.all.disable_ipv6: "1"
+    network_mode: service:dev-network-init
     depends_on:
       proxy:
         condition: service_healthy
+      dev-network-init:
+        condition: service_healthy
+        restart: true
     environment:
       PASSWORD: ${PASSWORD:?Set PASSWORD in .env}
       TZ: America/New_York
+      HERDR_SOCKET_PATH: /run/herdr/herdr.sock
     volumes:
       - type: bind
         source: ./dev-runtime/ssh-host-keys
@@ -25,14 +28,28 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: /Users/zeke/workspace
+        source: ${WORKSPACE_PATH:?Set WORKSPACE_PATH in .env}
         target: /home/dev/workspace
         bind:
           create_host_path: false
+      - type: bind
+        source: ${PERSONAL_WORKSPACE_PATH:?Set PERSONAL_WORKSPACE_PATH in .env}
+        target: /home/dev/personal
+        bind:
+          create_host_path: false
+      # Keep CleanShot file paths identical on the host and in SSH sessions.
+      - type: bind
+        source: ${CLEANSHOT_MEDIA_PATH:?Set CLEANSHOT_MEDIA_PATH in .env}
+        target: ${CLEANSHOT_MEDIA_PATH:?Set CLEANSHOT_MEDIA_PATH in .env}
+        read_only: true
+        bind:
+          create_host_path: false
       - ./proxy/resolv.conf:/etc/resolv.conf:ro
-    networks:
-      private:
-        ipv4_address: 172.30.0.10
+      # Only sockets are temporary; ~/.config/herdr stays in the persistent home.
+      - type: tmpfs
+        target: /run/herdr
+        tmpfs:
+          size: 16777216
 
   tailscale:
     image: tailscale/tailscale:stable
@@ -59,7 +76,7 @@ services:
       outbound: {}
 
   proxy:
-    image: metacubex/mihomo:latest
+    image: metacubex/mihomo:v1.19.19
     environment:
       PASSWORD: ${PASSWORD:?Set PASSWORD in .env}
     restart: unless-stopped
@@ -69,7 +86,9 @@ services:
       net.ipv6.conf.all.disable_ipv6: "1"
     entrypoint: [/bin/sh, /scripts/proxy-entrypoint.sh]
     volumes:
-      - ./scripts/proxy-entrypoint.sh:/scripts/proxy-entrypoint.sh:ro
+      # Mount the directory, not a single file: replacing a bind-mounted file on
+      # the host would otherwise leave the container with a stale mount point.
+      - ./scripts/containers:/scripts:ro
       - type: bind
         source: ./proxy/config.yaml
         target: /root/.config/mihomo/config.yaml
@@ -79,7 +98,8 @@ services:
     networks:
       private:
         ipv4_address: 172.30.0.2
-      outbound: {}
+      outbound:
+        gw_priority: 1
     ports:
       - "127.0.0.1:19090:9090"
       - "127.0.0.1:2222:10022"
@@ -91,23 +111,32 @@ services:
       timeout: 3s
       retries: 12
 
-  # Only this short-lived helper shares dev's network namespace.
+  # Own the stable network namespace so restarting dev preserves its routes.
   # It never receives the proxy config or credentials.
   dev-network-init:
-    image: metacubex/mihomo:latest
-    network_mode: service:dev
-    restart: "no"
+    image: metacubex/mihomo:v1.19.19
+    restart: unless-stopped
     cap_add: [NET_ADMIN]
-    depends_on:
-      dev:
-        condition: service_started
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: "1"
+    networks:
+      private:
+        ipv4_address: 172.30.0.10
+    healthcheck:
+      test: [CMD, /bin/sh, /scripts/dev-network-init.sh, --check]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     entrypoint: [/bin/sh, /scripts/dev-network-init.sh]
     volumes:
-      - ./scripts/dev-network-init.sh:/scripts/dev-network-init.sh:ro
+      # Mount the directory, not a single file (see the proxy service above).
+      - ./scripts/containers:/scripts:ro
 
 networks:
   private:
-    internal: true
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+      com.docker.network.bridge.inhibit_ipv4: "true"
     enable_ipv6: false
     ipam:
       config:

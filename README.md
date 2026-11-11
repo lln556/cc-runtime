@@ -154,6 +154,12 @@ SSH 密钥目录和 Tailscale 状态目录由启动脚本初始化，普通 `dow
 python3 scripts/dev.py compose up -d --no-deps --force-recreate proxy
 ```
 
+### 截图路径共享（可选）
+
+在 `.env` 设置 `HOST_SCREENSHOTS_PATH`（指向宿主机截图目录，例如 Mac 的 CleanShot 媒体目录或 Linux 的 Flameshot 目录），启动脚本会在该目录存在时以相同绝对路径只读挂载到 `dev` 容器。
+
+通过 SSH 在容器内使用 Agent 时，可直接粘贴宿主机截图文件的完整本地路径，无需复制文件或手动改写路径。若未配置或目录不存在，则不进行挂载且不影响环境启动。更新后通过 `python3 scripts/dev.py up --no-pull` 应用。
+
 ### 持久化 dev 家目录
 
 当前目录下的 `dev-runtime/home/` 绑定到容器 `/home/dev`。Shell 配置、Claude 登录状态、SSH 文件和用户安装的工具等会保留在这里，容器重建后仍然可用。

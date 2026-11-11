@@ -185,13 +185,11 @@ Herdr 的 `~/.config/herdr` 随 `dev-runtime/home/` 持久化，保存配置、`
 
 不要将整个 `~/.config/herdr` 挂成 tmpfs，否则配置和历史会在重建后丢失。重建会终止运行中的进程；持久化会话数据不等于保留运行中的 Agent，重新登录后需要打开 Herdr 并按需恢复 Agent 会话。
 
-### CleanShot 截图路径共享
+### 截图路径共享（可选）
 
-当前 Mac 的 `${CLEANSHOT_MEDIA_PATH}` 以相同绝对路径只读挂载到 dev。通过 SSH 在容器内使用 Agent 时，可直接粘贴 CleanShot 图片的完整本机路径，无需复制文件或改写路径；路径含空格，在 Shell 中使用时需加引号。
+在 `.env` 设置 `HOST_SCREENSHOTS_PATH`（指向宿主机截图目录，例如 Mac 的 CleanShot 媒体目录或 Linux 的 Flameshot 目录，旧变量 `CLEANSHOT_MEDIA_PATH` 保持兼容）。启动脚本在目录存在时以相同绝对路径只读挂载到 `dev` 容器。
 
-挂载覆盖整个媒体目录，新截图的子目录会自动可见。文件仍由宿主机管理，CleanShot 清理截图后容器也无法再读取。此挂载不传输剪贴板内容，也不共享其他电脑的截图。换用其他 Mac 用户时应同步修改 `source` 和 `target`；不使用 CleanShot 的主机可移除此挂载。
-
-修改后通过 `python3 scripts/dev.py compose up -d --no-deps --force-recreate dev` 应用。该操作保留生成的依赖挂载和持久化数据，但会断开现有 SSH 会话。
+通过 SSH 在容器内使用 Agent 时，可直接粘贴宿主机截图文件的完整本地路径，无需复制文件或手动改写路径。若未配置或目录不存在，则不进行挂载且不影响环境启动。更新后通过 `python3 scripts/dev.py up --no-pull` 应用。
 
 ### 容器 → Mac 任务桥接（可选）
 

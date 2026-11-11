@@ -37,13 +37,6 @@ services:
         target: /home/dev/personal
         bind:
           create_host_path: false
-      # Keep CleanShot file paths identical on the host and in SSH sessions.
-      - type: bind
-        source: ${CLEANSHOT_MEDIA_PATH:?Set CLEANSHOT_MEDIA_PATH in .env}
-        target: ${CLEANSHOT_MEDIA_PATH:?Set CLEANSHOT_MEDIA_PATH in .env}
-        read_only: true
-        bind:
-          create_host_path: false
       - ./proxy/resolv.conf:/etc/resolv.conf:ro
       # Only sockets are temporary; ~/.config/herdr stays in the persistent home.
       - type: tmpfs

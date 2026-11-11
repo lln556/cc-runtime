@@ -33,6 +33,21 @@ def compose(*args, overlay=False, capture=False):
     return run(command + list(args), capture=capture)
 
 
+def get_compose_env():
+    """Read environment variables resolved by Docker Compose from .env and the shell."""
+    resolved = dict(os.environ)
+    try:
+        output = run(["docker", "compose", "--project-directory", str(ROOT), "config", "--environment"],
+                     capture=True)
+        for line in output.splitlines():
+            if "=" in line:
+                key, _, value = line.partition("=")
+                resolved[key] = value
+    except (subprocess.CalledProcessError, OSError):
+        pass
+    return resolved
+
+
 def relative_path(value):
     path = PurePosixPath(value)
     if not value or path.is_absolute() or ".." in path.parts or path == PurePosixPath("."):
@@ -177,6 +192,17 @@ def generate():
                         raise ValueError("Identity storage must not contain the shared workspace")
                     if workspace in identity.parents:
                         rules["exclude_paths"].append(identity.relative_to(workspace).as_posix())
+        # Exclude host screenshots path from dependency scan if located within workspace.
+        env_vars = get_compose_env()
+        screenshots_env = env_vars.get("HOST_SCREENSHOTS_PATH") or env_vars.get("CLEANSHOT_MEDIA_PATH")
+        if screenshots_env and screenshots_env.strip():
+            screenshots_path = Path(screenshots_env.strip()).expanduser()
+            if screenshots_path.is_dir():
+                resolved_screenshots = screenshots_path.resolve()
+                if resolved_screenshots == workspace or resolved_screenshots in workspace.parents:
+                    raise ValueError("Host screenshots path must not contain the shared workspace")
+                if workspace in resolved_screenshots.parents:
+                    rules["exclude_paths"].append(resolved_screenshots.relative_to(workspace).as_posix())
         entries, symlinks = scan(workspace, rules)
         current_overlay, current_plan = make_plan(workspace, entries, model["name"], architecture,
                                                  target=mount["target"])
@@ -193,6 +219,21 @@ def generate():
             plan["entries"].extend(entries)
         print(f"Scanned {workspace}: {len(entries)} isolated directories", flush=True)
     plan["workspaces"] = workspaces
+    # Mount host screenshots directory with identical path into dev when configured and directory exists.
+    env_vars = get_compose_env()
+    screenshots_env = env_vars.get("HOST_SCREENSHOTS_PATH") or env_vars.get("CLEANSHOT_MEDIA_PATH")
+    if screenshots_env and screenshots_env.strip():
+        screenshots_path = Path(screenshots_env.strip()).expanduser()
+        if screenshots_path.is_dir():
+            target_path = screenshots_path.resolve().as_posix()
+            overlay["services"]["dev"]["volumes"].append({
+                "type": "bind",
+                "source": target_path,
+                "target": target_path,
+                "read_only": True,
+                "bind": {"create_host_path": False}
+            })
+            plan["host_screenshots_path"] = target_path
     STATE.mkdir(exist_ok=True)
     # Compose interpolates '$' in values, even in JSON. Escape literal path characters.
     encoded = json.dumps(overlay, ensure_ascii=False, indent=2).replace("$", "$$")

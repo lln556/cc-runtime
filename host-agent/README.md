@@ -15,6 +15,8 @@ host-agent/bin/host-agent probe
 
 setup 只生成本地配置、状态目录和 LaunchAgent 草稿，不安装服务、不重建容器。`config/local.json` 中的路径相对于该配置文件；`projects` 是允许使用的项目别名及 Mac 实际目录。默认只有 `cc-runtime`。添加 `ios-app` 等项目时填写其真实路径；容器提交完整 HEAD，worker 验证一致后才执行。工作区未提交改动仍共享，双方须暂停冲突写入。
 
+每个项目可配置 `client_paths`，列出调用方所见的绝对 Git 仓库根路径，例如 Mac 的 `/Users/axis/projects/yue` 对应容器的 `["/home/dev/personal/yue"]`。`capabilities.project_paths` 发布各项目的 Mac 路径和调用方路径。客户端从当前工作目录取得 Git 根目录，精确匹配唯一项目；仓库子目录自动归属于该仓库，嵌套的独立仓库须单独配置。没有映射、映射歧义或显式 `--project` 与自动结果不符时，提交失败，不回退到其他项目。服务端再次核对请求中的 `caller_repo`；升级前已排队且不含该字段的任务仍按原有流程处理。修改项目映射后需在空闲时重启 worker，重新发布 capabilities；不要中断运行中的任务。
+
 `probe` 只验证接口与工具发现。`computer_use=advertised` 不代表具体应用、浏览器、手机、macOS 权限已经可用。独立的新任务必须实际调用对应工具才能确认。
 
 可在 `config/local.json` 中指定 `model` 和 `effort`（例如 `"model": "可用模型ID", "effort": "high"`）；留空或设为 null 时采用服务默认值。模型在新建和续接会话时传入，推理强度在每次启动任务时传入。仅宿主机管理配置，不向调用方暴露模型选项。修改后重启接收进程即可生效，无需重建容器；模型及推理强度必须由当前 Provider 支持。
@@ -54,13 +56,13 @@ Skill 目录已只读挂载，编辑后容器可直接读取新内容；已加�
 容器中的 `host-agent capabilities` 显示心跳和项目名单。所有客户端命令输出 JSON；错误退出码为 1。
 
 ```bash
-host-agent submit --project ios-app --title "构建验收" --commit "$(git rev-parse HEAD)" \
+host-agent submit --title "构建验收" --commit "$(git rev-parse HEAD)" \
   --task '完成 iOS 构建和 AppLayoutTests，提供日志和失败原因'
 host-agent status TASK_ID
 host-agent result TASK_ID
 host-agent message TASK_ID '补充说明……'
 host-agent cancel TASK_ID
-host-agent submit --project ios-app --title "失败排查" --after TASK_ID --task '继续检查上一步失败原因'
+host-agent submit --title "失败排查" --after TASK_ID --task '继续检查上一步失败原因'
 ```
 
 默认任务授权范围仅为本地构建、测试和诊断。`--authorization` 传递用户已经给出的授权，不是新的授权来源；宿主机仍读取项目 AGENTS.md。执行权限由 Mac 配置决定，full-access 不扩大任务中允许操作的范围。需要只读任务时，将项目 sandbox 配为 read-only。

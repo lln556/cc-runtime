@@ -161,12 +161,33 @@ def generate():
                     raise ValueError("Identity storage must not contain the shared workspace")
                 if workspace in identity.parents:
                     rules["exclude_paths"].append(identity.relative_to(workspace).as_posix())
+    # Exclude host screenshots path from dependency scan if located within workspace.
+    screenshots_env = os.environ.get("HOST_SCREENSHOTS_PATH") or os.environ.get("CLEANSHOT_MEDIA_PATH")
+    screenshots_target = None
+    if screenshots_env and screenshots_env.strip():
+        screenshots_path = Path(screenshots_env.strip()).expanduser()
+        if screenshots_path.is_dir():
+            resolved_screenshots = screenshots_path.resolve()
+            screenshots_target = resolved_screenshots.as_posix()
+            if resolved_screenshots == workspace or resolved_screenshots in workspace.parents:
+                raise ValueError("Host screenshots path must not contain the shared workspace")
+            if workspace in resolved_screenshots.parents:
+                rules["exclude_paths"].append(resolved_screenshots.relative_to(workspace).as_posix())
     entries, symlinks = scan(workspace, rules)
     architecture = run(["docker", "info", "--format", "{{.Architecture}}"], capture=True).strip()
     if not architecture or not all(c.isalnum() or c in "_-" for c in architecture):
         raise ValueError("Unexpected Docker server architecture")
     overlay, plan = make_plan(workspace, entries, model["name"], architecture)
     plan["skipped_symlinks"] = symlinks
+    if screenshots_target:
+        overlay["services"]["dev"]["volumes"].append({
+            "type": "bind",
+            "source": screenshots_target,
+            "target": screenshots_target,
+            "read_only": True,
+            "bind": {"create_host_path": False}
+        })
+        plan["host_screenshots_path"] = screenshots_target
     STATE.mkdir(exist_ok=True)
     # Compose interpolates '$' in values, even in JSON. Escape literal path characters.
     encoded = json.dumps(overlay, ensure_ascii=False, indent=2).replace("$", "$$")

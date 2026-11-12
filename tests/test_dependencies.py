@@ -42,6 +42,47 @@ class ScannerTests(unittest.TestCase):
                 _, plan = dev.generate()
             self.assertEqual(plan["entries"], [])
 
+    def test_host_screenshots_mount_when_configured_and_existing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            screenshots_dir = root / "screenshots"
+            screenshots_dir.mkdir()
+            (root / "dependency-rules.json").write_text(json.dumps(RULES))
+            model = {"name": "test", "services": {
+                "dev": {"volumes": [
+                    {"type": "bind", "source": str(root), "target": dev.WORKSPACE_TARGET}]}}}
+            with patch.object(dev, "ROOT", root), patch.object(dev, "STATE", root / ".runtime"), \
+                    patch.object(dev, "OVERLAY", root / ".runtime/compose.json"), \
+                    patch.object(dev, "compose", return_value=json.dumps(model)), \
+                    patch.object(dev, "run", return_value="aarch64"), \
+                    patch.dict(os.environ, {"HOST_SCREENSHOTS_PATH": str(screenshots_dir)}):
+                _, plan = dev.generate()
+            overlay = json.loads((root / ".runtime/compose.json").read_text())
+            target = screenshots_dir.resolve().as_posix()
+            self.assertEqual(plan.get("host_screenshots_path"), target)
+            mount = next(m for m in overlay["services"]["dev"]["volumes"] if m.get("target") == target)
+            self.assertEqual(mount["source"], target)
+            self.assertTrue(mount["read_only"])
+            self.assertFalse(mount["bind"]["create_host_path"])
+
+    def test_host_screenshots_ignored_when_missing_or_empty(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "dependency-rules.json").write_text(json.dumps(RULES))
+            model = {"name": "test", "services": {
+                "dev": {"volumes": [
+                    {"type": "bind", "source": str(root), "target": dev.WORKSPACE_TARGET}]}}}
+            with patch.object(dev, "ROOT", root), patch.object(dev, "STATE", root / ".runtime"), \
+                    patch.object(dev, "OVERLAY", root / ".runtime/compose.json"), \
+                    patch.object(dev, "compose", return_value=json.dumps(model)), \
+                    patch.object(dev, "run", return_value="aarch64"), \
+                    patch.dict(os.environ, {"HOST_SCREENSHOTS_PATH": str(root / "nonexistent")}):
+                _, plan = dev.generate()
+            overlay = json.loads((root / ".runtime/compose.json").read_text())
+            self.assertNotIn("host_screenshots_path", plan)
+            self.assertFalse(any(m.get("target") == str(root / "nonexistent")
+                                 for m in overlay["services"]["dev"]["volumes"]))
+
     def test_project_detection_preserves_source_directories(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

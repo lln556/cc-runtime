@@ -1,0 +1,15 @@
+# Enabled by host-agent/config/enabled; scripts/dev.py preserves this overlay.
+# Paths are relative to the base compose.yaml project directory.
+services:
+  dev:
+    environment:
+      HOST_AGENT_MAILBOX: /run/host-agent
+    volumes:
+      - type: bind
+        source: ./host-agent/state/mailbox
+        target: /run/host-agent
+        bind:
+          create_host_path: false
+      - ./host-agent/src:/opt/host-agent/src:ro
+      - ./host-agent/bin/host-agent:/usr/local/bin/host-agent:ro
+      - ./host-agent/skills/host-agent:/home/dev/.claude/skills/host-agent:ro

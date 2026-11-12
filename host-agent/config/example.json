@@ -1,0 +1,22 @@
+{
+  "socket": "~/.codex/app-server-control/app-server-control.sock",
+  "mailbox": "../state/mailbox",
+  "host_state": "../state/host",
+  "instructions": "../execution.md",
+  "model": null,
+  "effort": null,
+  "approval_policy": "never",
+  "herdr": {
+    "enabled": true,
+    "binary": "herdr",
+    "session": "default"
+  },
+  "poll_seconds": 1,
+  "task_timeout_seconds": 3600,
+  "projects": {
+    "cc-runtime": {
+      "path": "../..",
+      "sandbox": "danger-full-access"
+    }
+  }
+}

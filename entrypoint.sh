@@ -124,7 +124,9 @@ echo "✅ noVNC (Web VNC client) started on port $VNC_PORT."
 CLAUDE_DIR="/home/dev/.claude"
 CLAUDE_FILE="/home/dev/.claude.json"
 if [ -e "$CLAUDE_DIR" ]; then
-    sudo chown -R dev:dev "$CLAUDE_DIR"
+    # Read-only Skill mounts retain their supplied ownership. Prune them before
+    # fixing the writable home; chown -h also leaves symlink targets untouched.
+    sudo find "$CLAUDE_DIR" -type d ! -writable -prune -o -exec chown -h dev:dev {} +
 fi
 if [ -e "$CLAUDE_FILE" ]; then
     sudo chown dev:dev "$CLAUDE_FILE"

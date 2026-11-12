@@ -12,3 +12,4 @@ dev-home/
 ssh-host-keys/
 dev-runtime/
 tailscale/
+host-agent/

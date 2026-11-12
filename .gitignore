@@ -10,3 +10,7 @@ tailscale/state/
 
 
 docs/local/
+host-agent/state/
+host-agent/config/local.json
+host-agent/config/execution.local.md
+host-agent/config/enabled

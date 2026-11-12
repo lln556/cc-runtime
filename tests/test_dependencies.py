@@ -16,6 +16,25 @@ spec.loader.exec_module(dev)
 RULES = json.loads((ROOT / "dependency-rules.json").read_text())
 
 
+class HostAgentComposeTests(unittest.TestCase):
+    def test_opt_in_overlay_preserves_dependency_mounts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            marker = root / "host-agent/config/enabled"
+            marker.parent.mkdir(parents=True)
+            with patch.object(dev, "ROOT", root), patch.object(dev, "BASE", root / "compose.yaml"), \
+                    patch.object(dev, "OVERLAY", root / ".runtime/compose.dependencies.json"), \
+                    patch.object(dev, "run") as run:
+                dev.compose("config", "--quiet", overlay=True)
+                self.assertNotIn(str(root / "host-agent/compose.yaml"), run.call_args.args[0])
+                marker.touch()
+                dev.compose("config", "--quiet", overlay=True)
+                command = run.call_args.args[0]
+                self.assertIn(str(root / ".runtime/compose.dependencies.json"), command)
+                self.assertIn(str(root / "host-agent/compose.yaml"), command)
+                self.assertEqual(command[-2:], ["config", "--quiet"])
+
+
 class ScannerTests(unittest.TestCase):
     def test_generate_excludes_private_identity_storage(self):
         with tempfile.TemporaryDirectory() as temporary:

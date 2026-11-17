@@ -1,6 +1,6 @@
 # cc-runtime
 
-在一台 Mac 上运行多台 Linux 开发机（`dev-pennsylvania`、`dev-california`），每台有独立身份和出口网关，共用一份通过 Mutagen 同步的工作区。设计见 `docs/architecture.md` 和 `docs/workspace.md`，使用见 `README.md`。
+在一台 Mac 上运行多台 Linux 开发机（`dev-pennsylvania`、`dev-california`），每台有独立身份和出口网关，共用一份通过 Mutagen 同步的工作区。`.env` 的 `REMOTE_SHELL_MACHINES` 里的开发机改为直接挂载 Mac 工作区，Claude Code 的 Bash 命令经 remote-shell 在 Mac 上执行。设计见 `docs/architecture.md`、`docs/workspace.md` 和 `docs/remote-shell.md`，使用见 `README.md`。
 
 ## 常用命令
 
@@ -18,6 +18,7 @@ cc-runtime status            # 状态面板（在 Mac 上运行）
 - 文件按服务归组：Tailscale 配置在 `tailscale/config/`，登录状态在 `tailscale/state/`；每台开发机的家目录、SSH 主机密钥和 machine-id 在 `dev-runtimes/<机器名>/`（`home/`、`ssh-host-keys/`、`machine-id`）。新开发机命名为 `dev-{代号}`。
 - 配置和脚本入库；凭据、私钥、运行时状态和家目录不进 Git，也不进 Docker 构建上下文（`.dockerignore` 是白名单，只放行镜像需要的文件）。
 - 更换镜像、重建容器或移动存储时，保留 SSH 主机密钥和 Tailscale 状态。移动运行中的状态前先停止对应服务，重启后核对身份（主机密钥指纹、machine-id）。
+- remote-shell：`scripts/install.sh` 同时交叉编译开发机用的 linux 版到 `RUNTIME_DIR/bin`，并重启 Mac 上的服务（有命令在运行时只提示）。两端不兼容的协议改动要增加 `internal/remoteshell` 的 `ProtocolVersion`。改完用 `cc-runtime check remote-shell` 端到端验证。
 - 用 `cc-runtime up` 或 `cc-runtime compose` 启动服务。它们会先准备家目录、身份和缓存；直接 `docker compose up` 创建开发机会跳过这一步，新机器会得到全新的身份。
 - 开发机之间保持身份独立：不要在家目录之间复制 SSH 主机密钥、machine-id、遥测 ID、`~/.claude` 或 `~/.claude.json`。工具凭据和 SSH 客户端密钥只按 `internal/seed/seed.go` 里的 `Credentials` 共享，往里加东西前先征得使用者同意。新家目录只用 `cc-runtime seed-home` 初始化。
 - 代理配置：先改 `proxy/config.example.yaml`，再把同样的改动应用到每份实际配置（`proxy/config-pennsylvania.yaml`、`proxy/config-california.yaml`），然后运行 `cc-runtime check proxy`。模板里不能出现真实凭据或节点/VPS 地址，见 `proxy/README.md`。

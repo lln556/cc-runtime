@@ -20,6 +20,7 @@
 
 - [架构](docs/architecture.md)：服务组成、网络与网关、开发机身份、镜像。
 - [工作区](docs/workspace.md)：同步副本、依赖隔离、git 数据外置、去重、定时任务，以及为什么这样设计。
+- [remote-shell](docs/remote-shell.md)：让开发机里 Claude Code 的 Bash 命令在 Mac 上执行（可选，按开发机启用）。
 - [代理网关配置](proxy/README.md)：网关配置的模板与修改流程。
 
 ## 要求
@@ -76,6 +77,8 @@
 
 7. **Tailscale（可选）。** `cc-runtime compose logs tailscale` 里有登录链接；登录后在管理后台为该设备关闭密钥过期。
 
+8. **remote-shell（可选）。** 在 `.env` 的 `REMOTE_SHELL_MACHINES` 里列出开发机，`cc-runtime remote-shell install` 启动 Mac 上的服务，`cc-runtime up <网关> <开发机> --force-recreate`，再按 [remote-shell](docs/remote-shell.md#和-claude-code-的衔接) 配置开发机的 Claude Code，最后 `cc-runtime check remote-shell`。
+
 ## 访问
 
 | 开发机 | SSH | VNC | noVNC |
@@ -101,7 +104,8 @@
 | `cc-runtime schedule list \| install \| uninstall` | launchd 定时任务 |
 | `cc-runtime job run \| log <任务>` | 立即运行任务，或查看运行记录 |
 | `cc-runtime seed-home <源> <目标>` | 用现有家目录初始化新开发机的家目录 |
-| `cc-runtime check ignores \| proxy` | 检查忽略名单、网关配置与模板是否一致 |
+| `cc-runtime remote-shell status \| install \| uninstall \| restart [--force]` | Mac 上的 remote-shell 服务 |
+| `cc-runtime check ignores \| proxy \| remote-shell` | 检查忽略名单、网关配置与模板是否一致、remote-shell 端到端可用 |
 
 使用工作区的约定（同一时间只在一侧做 git 写操作、复制项目用 `git clone` 等）见 [工作区](docs/workspace.md#git-数据外置)。
 

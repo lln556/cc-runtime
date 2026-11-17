@@ -2,15 +2,17 @@
 
 同一个项目常常既在 Mac 上跑，也在开发机（linux/arm64）里跑。源码要两边共享，而依赖和构建产物（`node_modules`、`.venv`、`target`……）是平台相关的，不能共用同一个目录。本文说明 cc-runtime 怎么同时做到这两点。
 
-## 两种用法
+## 三种用法
 
-| | 纯 Linux | 同步副本（默认部署） |
-| --- | --- | --- |
-| 适用 | 项目只在开发机里运行和构建 | 同一个项目在 Mac 和开发机里都要运行 |
-| 源码 | 一份，开发机直接挂载 Mac 的 workspace | 两份，Mutagen 双向同步 |
-| 依赖 | 只有 Linux 一套 | Mac 一套，Linux 一套 |
-| git 数据 | 在仓库原位 | 一份，移到两棵树之外 |
-| 额外机制 | 无 | 同步会话、git 目录迁出、去重 |
+| | 纯 Linux | 同步副本（默认部署） | Mac 执行（remote-shell） |
+| --- | --- | --- | --- |
+| 适用 | 项目只在开发机里运行和构建 | 同一个项目在 Mac 和开发机里都要运行 | 项目在 Mac 上运行和构建，开发机只跑 Claude Code |
+| 源码 | 一份，开发机直接挂载 Mac 的 workspace | 两份，Mutagen 双向同步 | 一份，开发机直接挂载 Mac 的 workspace |
+| 依赖 | 只有 Linux 一套 | Mac 一套，Linux 一套 | 只有 Mac 一套 |
+| git 数据 | 在仓库原位 | 一份，移到两棵树之外 | 只在 Mac 一侧写（外置的仓库经同路径挂载照常可用） |
+| 额外机制 | 无 | 同步会话、git 目录迁出、去重 | Mac 上的 remote-shell 服务 |
+
+Mac 执行按开发机启用（`.env` 的 `REMOTE_SHELL_MACHINES`），可以和同步副本共存：启用的开发机直接挂 Mac 的工作区，Claude Code 的 Bash 命令在 Mac 上执行，其余开发机照旧挂 Linux 副本。见 [remote-shell](remote-shell.md)。
 
 纯 Linux 的做法：Mac 上的编辑器通过远程开发连进开发机（Cursor/VS Code 的 Remote-SSH、Zed 的远程开发），编辑、语言服务、终端和构建都在开发机里进行，依赖只装在开发机里。只在 Mac 上构建的项目（例如 Xcode 工程）同样不需要隔离。只要不需要在 Mac 本机运行项目，这种用法最简单。
 

@@ -54,7 +54,10 @@ flowchart LR
 | `dev-pennsylvania` | `127.0.0.1:2222` | `127.0.0.1:5901` | `http://127.0.0.1:6080/vnc.html` |
 | `dev-california` | `127.0.0.1:2223` | `127.0.0.1:5902` | `http://127.0.0.1:6081/vnc.html` |
 
-端口只绑定宿主机的 `127.0.0.1`。网关还在私网上开一个端口（`<网关 IP>:10023`），转发到宿主机的 SSH（`host.docker.internal:22`），开发机可以借此在 Mac 上执行命令；该端口不发布到宿主机。
+端口只绑定宿主机的 `127.0.0.1`。网关还在私网上开两个端口，转发到宿主机，开发机可以借此在 Mac 上执行命令；它们不发布到宿主机，也不经过代理链：
+
+- `<网关 IP>:10023` → `host.docker.internal:22`：Mac 的 SSH。
+- `<网关 IP>:10024` → `host.docker.internal:47100`：Mac 上的 remote-shell 服务（LaunchAgent），启用的开发机里 Claude Code 的 Bash 命令经它在 Mac 上执行，见 [remote-shell](remote-shell.md)。
 
 ### Tailscale
 

@@ -16,6 +16,7 @@ import (
 	"github.com/zeke-chin/cc-runtime/internal/gitstore"
 	"github.com/zeke-chin/cc-runtime/internal/jobs"
 	"github.com/zeke-chin/cc-runtime/internal/mutagen"
+	"github.com/zeke-chin/cc-runtime/internal/remoteshell"
 	"github.com/zeke-chin/cc-runtime/internal/ui"
 	"github.com/zeke-chin/cc-runtime/internal/util"
 )
@@ -178,6 +179,29 @@ func JobsSection(cfg config.Config) *ui.Table {
 	return table
 }
 
+// RemoteShellSection 是 remote-shell 服务的状态；没有启用也没有安装时不显示。
+func RemoteShellSection(cfg config.Config) *ui.Table {
+	machines := remoteshell.Machines(cfg)
+	state := remoteshell.State(cfg)
+	if len(machines) == 0 && !state.Installed {
+		return nil
+	}
+	table := itemTable("remote-shell")
+	switch {
+	case state.Pid > 0 && state.Version != config.Version:
+		table.Add("服务", ui.C(fmt.Sprintf("运行中，但版本是 %s；用 cc-runtime remote-shell restart 重启", state.Version), Warn))
+	case state.Pid > 0:
+		table.Add("服务", ui.C(fmt.Sprintf("运行中（pid %d）", state.Pid), OK))
+	case state.Loaded:
+		table.Add("服务", ui.C("已加载，未运行", Bad))
+	default:
+		table.Add("服务", ui.C("未安装；用 cc-runtime remote-shell install 安装", Bad))
+	}
+	table.Add("开发机", ui.C(strings.Join(machines, ", "), ui.None))
+	table.Add("进行中", ui.C(fmt.Sprintf("%d 条命令", len(state.Active)), ui.None))
+	return table
+}
+
 func GitSection(cfg config.Config, full bool) *ui.Table {
 	table := itemTable("Git 数据")
 	table.Add("共享目录", cfg.GitStore())
@@ -295,6 +319,9 @@ func Render(cfg config.Config, fullGit bool, width int) string {
 	var body []string
 	add := func(build func() (*ui.Table, error)) {
 		table, err := build()
+		if table == nil && err == nil {
+			return
+		}
 		if table != nil {
 			table.Expand = true
 		}
@@ -309,6 +336,7 @@ func Render(cfg config.Config, fullGit bool, width int) string {
 	}
 	add(func() (*ui.Table, error) { return SyncSection(cfg) })
 	add(func() (*ui.Table, error) { return JobsSection(cfg), nil })
+	add(func() (*ui.Table, error) { return RemoteShellSection(cfg), nil })
 	add(func() (*ui.Table, error) { return GitSection(cfg, fullGit), nil })
 	add(func() (*ui.Table, error) { return DiskSection(cfg) })
 	add(func() (*ui.Table, error) { return ContainersSection(cfg), nil })

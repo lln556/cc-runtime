@@ -11,11 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/zeke-chin/cc-runtime/internal/config"
+	"github.com/zeke-chin/cc-runtime/internal/remoteshell"
 	"github.com/zeke-chin/cc-runtime/internal/util"
 )
 
@@ -40,9 +42,10 @@ type Network struct {
 }
 
 type Service struct {
-	Image    string              `json:"image"`
-	Volumes  []Mount             `json:"volumes"`
-	Networks map[string]*Network `json:"networks"`
+	Image       string              `json:"image"`
+	Volumes     []Mount             `json:"volumes"`
+	Networks    map[string]*Network `json:"networks"`
+	Environment map[string]*string  `json:"environment"`
 }
 
 type Project struct {
@@ -87,12 +90,17 @@ func composeWith(cfg config.Config, files []string, capture, allowFail bool, arg
 	return runCommand(append(command, args...), util.Opts{Capture: capture, AllowFail: allowFail})
 }
 
-// composeFiles 是本部署的 Compose 文件：compose.yaml，以及配置了截图目录时生成的叠加文件。
+// composeFiles 是本部署的 Compose 文件：compose.yaml，以及需要时生成的叠加文件
+// （截图目录、启用 remote-shell 的开发机）。
 func composeFiles(cfg config.Config) ([]string, error) {
 	base := filepath.Join(cfg.Root, "compose.yaml")
 	dir, err := ScreenshotsMount(cfg)
-	if err != nil || dir == "" {
-		return []string{base}, err
+	if err != nil {
+		return nil, err
+	}
+	machines := remoteshell.Machines(cfg)
+	if dir == "" && len(machines) == 0 {
+		return []string{base}, nil
 	}
 	result, err := composeWith(cfg, []string{base}, true, false, "config", "--format", "json")
 	if err != nil {
@@ -102,13 +110,15 @@ func composeFiles(cfg config.Config) ([]string, error) {
 	if err := json.Unmarshal([]byte(result.Stdout), &project); err != nil {
 		return nil, fmt.Errorf("无法解析 docker compose config 的输出：%w", err)
 	}
-	// 源用真实路径；容器里用配置的路径，使用者粘贴的就是它。
-	overlay := screenshotsOverlay(DevServices(project), dir, filepath.Clean(cfg.Screenshots))
+	overlay, err := buildOverlay(cfg, project, dir, machines)
+	if err != nil {
+		return nil, err
+	}
 	data, err := json.MarshalIndent(overlay, "", "  ")
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(cfg.StateDir(), "compose.screenshots.json")
+	path := filepath.Join(cfg.StateDir(), "compose.overlay.json")
 	if err := os.MkdirAll(cfg.StateDir(), 0o755); err != nil {
 		return nil, err
 	}
@@ -117,6 +127,41 @@ func composeFiles(cfg config.Config) ([]string, error) {
 		return nil, err
 	}
 	return []string{base, path}, nil
+}
+
+// buildOverlay 合并各项叠加配置。Compose 按挂载目标合并卷，所以 remote-shell 的工作区
+// 挂载会替换 compose.yaml 里同一目标上的 Linux 副本。
+func buildOverlay(cfg config.Config, project Project, screenshots string, machines []string) (map[string]any, error) {
+	devs := DevServices(project)
+	volumes := map[string][]any{}
+	if screenshots != "" {
+		// 源用真实路径；容器里用配置的路径，使用者粘贴的就是它。
+		mount := screenshotsVolume(screenshots, filepath.Clean(cfg.Screenshots))
+		for _, name := range devs {
+			volumes[name] = append(volumes[name], mount)
+		}
+	}
+	for _, machine := range machines {
+		if !slices.Contains(devs, machine) {
+			return nil, util.Errorf("REMOTE_SHELL_MACHINES 里的 %s 不是开发机；可选：%s", machine, strings.Join(devs, ", "))
+		}
+		volumes[machine] = append(volumes[machine], remoteshell.MachineOverlay(cfg, machine)...)
+	}
+	services := map[string]any{}
+	for name, list := range volumes {
+		services[name] = map[string]any{"volumes": list}
+	}
+	return map[string]any{"services": services}, nil
+}
+
+// GatewayIP 是开发机的网关地址：取自它的 network-init 服务（与 scripts/dev-network-init.sh 的默认值一致）。
+func GatewayIP(p Project, machine string) string {
+	if helper, ok := p.Services[machine+"-network-init"]; ok {
+		if value := helper.Environment["GATEWAY_IP"]; value != nil && *value != "" {
+			return *value
+		}
+	}
+	return "172.30.0.2"
 }
 
 // ScreenshotsMount 返回要挂进开发机的截图目录（真实路径）。没配置、目录不存在，
@@ -161,16 +206,10 @@ func within(path, dir string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
-// screenshotsOverlay 让每台开发机在相同路径上只读挂载截图目录。
-func screenshotsOverlay(machines []string, source, target string) map[string]any {
-	services := map[string]any{}
-	for _, name := range machines {
-		services[name] = map[string]any{"volumes": []any{map[string]any{
-			"type": "bind", "source": source, "target": target, "read_only": true,
-			"bind": map[string]any{"create_host_path": false},
-		}}}
-	}
-	return map[string]any{"services": services}
+// screenshotsVolume 在相同路径上只读挂载截图目录。
+func screenshotsVolume(source, target string) map[string]any {
+	return map[string]any{"type": "bind", "source": source, "target": target, "read_only": true,
+		"bind": map[string]any{"create_host_path": false}}
 }
 
 func Model(cfg config.Config) (Project, error) {
@@ -600,6 +639,11 @@ func Prepare(cfg config.Config, p Project, services []string) error {
 		if err := initializeCache(p, s.Image, s, uid, gid); err != nil {
 			return err
 		}
+		if remoteshell.Enabled(cfg, name) {
+			if _, err := remoteshell.PrepareMachine(cfg, name, GatewayIP(p, name)); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -695,4 +739,9 @@ func ComposePassthrough(cfg config.Config, args []string) (int, error) {
 	}
 	result, err := compose(cfg, false, true, args...)
 	return result.Code, err
+}
+
+// Exec 在服务的容器里以 dev 用户运行命令，收集输出。
+func Exec(cfg config.Config, service string, args ...string) (util.Result, error) {
+	return compose(cfg, true, true, append([]string{"exec", "-T", "-u", "dev", service}, args...)...)
 }

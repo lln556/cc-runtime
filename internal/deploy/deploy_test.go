@@ -256,7 +256,7 @@ func TestComposeAddsScreenshotsOverlayForDevMachines(t *testing.T) {
 	if _, err := compose(cfg, true, false, "ps"); err != nil {
 		t.Fatal(err)
 	}
-	overlay := filepath.Join(cfg.StateDir(), "compose.screenshots.json")
+	overlay := filepath.Join(cfg.StateDir(), "compose.overlay.json")
 	want := []string{"docker", "compose", "--project-directory", cfg.Root,
 		"-f", filepath.Join(cfg.Root, "compose.yaml"), "-f", overlay, "ps"}
 	if !slices.Equal(last, want) {
@@ -282,5 +282,45 @@ func TestComposeAddsScreenshotsOverlayForDevMachines(t *testing.T) {
 	}
 	if slices.Contains(last, overlay) {
 		t.Fatalf("命令是 %v", last)
+	}
+}
+
+func TestOverlayForRemoteShellMachines(t *testing.T) {
+	base := t.TempDir()
+	cfg := testutil.MakeConfig(t, base, "")
+	gateway := "172.30.0.4"
+	project := Project{Name: "p", Services: map[string]Service{
+		"dev-a": {Volumes: []Mount{{Type: "bind", Source: "/k", Target: SSHTarget},
+			{Type: "bind", Source: cfg.LinuxWorkspace(), Target: cfg.Workspace}}},
+		"dev-b":              {Volumes: []Mount{{Type: "bind", Source: "/k2", Target: SSHTarget}}},
+		"dev-a-network-init": {Environment: map[string]*string{"GATEWAY_IP": &gateway}},
+		"proxy-a":            {},
+	}}
+	if got := GatewayIP(project, "dev-a"); got != gateway {
+		t.Fatalf("网关 %s", got)
+	}
+	if got := GatewayIP(project, "dev-b"); got != "172.30.0.2" {
+		t.Fatalf("默认网关 %s", got)
+	}
+	overlay, err := buildOverlay(cfg, project, "", []string{"dev-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := overlay["services"].(map[string]any)
+	if _, ok := services["dev-b"]; ok || len(services) != 1 {
+		t.Fatalf("只应改 dev-a：%v", services)
+	}
+	text := fmt.Sprint(services["dev-a"])
+	for _, want := range []string{"target:" + cfg.Workspace, "source:" + util.Resolve(cfg.Workspace),
+		"target:/var/lib/cc-runtime/remote-shell", "target:/opt/cc-runtime", "read_only:true"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("缺少 %s：%s", want, text)
+		}
+	}
+	if strings.Contains(text, "linux-workspace") {
+		t.Fatalf("工作区不应再挂 Linux 副本：%s", text)
+	}
+	if _, err := buildOverlay(cfg, project, "", []string{"proxy-a"}); err == nil {
+		t.Fatal("非开发机应该报错")
 	}
 }

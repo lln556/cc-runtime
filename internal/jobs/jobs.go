@@ -257,10 +257,10 @@ func Plist(cfg config.Config, name string) (string, error) {
 	}
 	home, _ := os.UserHomeDir()
 	logPath := filepath.Join(cfg.LogDir(), name+".launchd.log")
-	entries := []kv{
+	entries := []KV{
 		{"Label", Label(name)},
 		{"ProgramArguments", []string{binary, "job", "run", name}},
-		{"EnvironmentVariables", []kv{{"CC_RUNTIME_ROOT", cfg.Root}, {"HOME", home}, {"PATH", LaunchdPath}}},
+		{"EnvironmentVariables", []KV{{"CC_RUNTIME_ROOT", cfg.Root}, {"HOME", home}, {"PATH", LaunchdPath}}},
 		{"StandardOutPath", logPath},
 		{"StandardErrorPath", logPath},
 		{"ProcessType", "Background"},
@@ -268,11 +268,16 @@ func Plist(cfg config.Config, name string) (string, error) {
 		{"Nice", 10},
 	}
 	if job.Calendar != nil {
-		entries = append(entries, kv{"StartCalendarInterval", []kv{{"Hour", job.Calendar.Hour}, {"Minute", job.Calendar.Minute}}})
+		entries = append(entries, KV{"StartCalendarInterval", []KV{{"Hour", job.Calendar.Hour}, {"Minute", job.Calendar.Minute}}})
 	}
 	if job.Interval > 0 {
-		entries = append(entries, kv{"StartInterval", job.Interval})
+		entries = append(entries, KV{"StartInterval", job.Interval})
 	}
+	return RenderPlist(entries), nil
+}
+
+// RenderPlist 把键值表写成 launchd 的 plist（XML 文本）。
+func RenderPlist(entries []KV) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -280,17 +285,21 @@ func Plist(cfg config.Config, name string) (string, error) {
 `)
 	writeValue(&b, entries, "")
 	b.WriteString("</plist>\n")
-	return b.String(), nil
+	return b.String()
 }
 
-type kv struct {
+// Executable 是安装好的 cc-runtime 的路径（不能是 go run 的临时文件）。
+func Executable() (string, error) { return executable() }
+
+// KV 是 plist 字典里的一项；值可以是 string、int、bool、[]string 或 []KV。
+type KV struct {
 	Key   string
 	Value any
 }
 
 func writeValue(b *strings.Builder, value any, indent string) {
 	switch v := value.(type) {
-	case []kv:
+	case []KV:
 		sort.SliceStable(v, func(i, j int) bool { return v[i].Key < v[j].Key })
 		b.WriteString(indent + "<dict>\n")
 		for _, item := range v {
@@ -324,7 +333,7 @@ func requireMacOS() error {
 	return nil
 }
 
-func domain() string { return fmt.Sprintf("gui/%d", os.Getuid()) }
+func Domain() string { return fmt.Sprintf("gui/%d", os.Getuid()) }
 
 func Install(cfg config.Config, names []string) error {
 	if err := requireMacOS(); err != nil {
@@ -345,8 +354,8 @@ func Install(cfg config.Config, names []string) error {
 		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 			return err
 		}
-		util.Run([]string{"launchctl", "bootout", domain(), path}, util.Opts{Capture: true, AllowFail: true})
-		if _, err := util.Run([]string{"launchctl", "bootstrap", domain(), path}, util.Opts{Capture: true}); err != nil {
+		util.Run([]string{"launchctl", "bootout", Domain(), path}, util.Opts{Capture: true, AllowFail: true})
+		if _, err := util.Run([]string{"launchctl", "bootstrap", Domain(), path}, util.Opts{Capture: true}); err != nil {
 			return err
 		}
 	}
@@ -359,7 +368,7 @@ func Uninstall(names []string) error {
 	}
 	for _, name := range names {
 		path := PlistPath(name)
-		util.Run([]string{"launchctl", "bootout", domain(), path}, util.Opts{Capture: true, AllowFail: true})
+		util.Run([]string{"launchctl", "bootout", Domain(), path}, util.Opts{Capture: true, AllowFail: true})
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -372,7 +381,7 @@ func Scheduled(name string) (present, loaded bool) {
 	if runtime.GOOS != "darwin" {
 		return false, false
 	}
-	result, err := util.Run([]string{"launchctl", "print", domain() + "/" + Label(name)},
+	result, err := util.Run([]string{"launchctl", "print", Domain() + "/" + Label(name)},
 		util.Opts{Capture: true, AllowFail: true})
 	loaded = err == nil && result.Code == 0
 	return util.Lexists(PlistPath(name)), loaded

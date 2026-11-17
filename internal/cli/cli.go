@@ -40,7 +40,8 @@ const overview = `cc-runtime：开发运行环境的统一入口。
   schedule    安装或移除 launchd 任务
   job         立即运行定时任务，或查看其日志
   seed-home   用已有家目录初始化新机器的家目录
-  check       一致性检查（同步忽略名单、网关配置）
+  remote-shell  让开发机的 Bash 命令在 Mac 上执行的服务
+  check       一致性检查（同步忽略名单、网关配置、remote-shell）
   version     显示版本
 
 每个命令都可以加 -h 查看说明。`
@@ -64,7 +65,9 @@ func init() {
 		"schedule":  {"schedule {list|install|uninstall} [任务...] [--all]", "launchd 定时任务", cmdSchedule},
 		"job":       {"job {run|log} <任务> [-n 次数] [--json]", "立即运行任务，或查看其日志", cmdJob},
 		"seed-home": {"seed-home <来源家目录> <目标家目录> [--dry-run] [--credentials-only]", "用已有家目录初始化新机器的家目录", cmdSeedHome},
-		"check":     {"check {ignores|proxy}", "一致性检查", cmdCheck},
+		"check":     {"check {ignores|proxy|remote-shell}", "一致性检查", cmdCheck},
+		"remote-shell": {"remote-shell {status|install|uninstall|restart|serve} [--force]",
+			"让开发机的 Bash 命令在 Mac 上执行的服务（LaunchAgent）", cmdRemoteShell},
 	}
 }
 
@@ -577,9 +580,12 @@ func cmdCheck(cfg config.Config, args []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	what, err := choose("check", "检查项", positional, "ignores", "proxy")
+	what, err := choose("check", "检查项", positional, "ignores", "proxy", "remote-shell")
 	if err != nil {
 		return 0, err
+	}
+	if what == "remote-shell" {
+		return checkRemoteShell(cfg)
 	}
 	failed := false
 	if what == "proxy" {

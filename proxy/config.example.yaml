@@ -114,6 +114,11 @@ tunnels:
     address: 172.30.0.2:10023
     target: host.docker.internal:22
     proxy: DIRECT
+  # Dev-to-host remote-shell service (cc-runtime remote-shell); private listener only.
+  - network: [tcp]
+    address: 172.30.0.2:10024
+    target: host.docker.internal:47100
+    proxy: DIRECT
   - network: [tcp]
     address: 0.0.0.0:10022
     target: 172.30.0.10:22

@@ -155,7 +155,10 @@ func (s *Server) handle(conn net.Conn) {
 	conn.SetReadDeadline(time.Now().Add(RequestTimeout))
 	kind, payload, err := ReadFrame(conn)
 	if err != nil || kind != FrameRequest {
-		s.logf("%s：没有收到请求帧（%v）", peer, err)
+		// 连上后什么都不发就断开的是端口探测（check remote-shell），不记日志。
+		if !errors.Is(err, io.EOF) {
+			s.logf("%s：没有收到请求帧（%v）", peer, err)
+		}
 		return
 	}
 	conn.SetReadDeadline(time.Time{})

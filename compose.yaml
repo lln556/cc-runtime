@@ -84,9 +84,14 @@ services:
       private:
         ipv4_address: 172.30.0.11
 
+  # Inbound: tailnet SSH to dev-pennsylvania (Serve). Outbound: a SOCKS5
+  # listener the gateways use to reach tailnet addresses; only the gateways
+  # may connect to it (see tailscale-entrypoint.sh).
   tailscale:
     image: tailscale/tailscale:stable
     restart: unless-stopped
+    cap_add: [NET_ADMIN]
+    entrypoint: [/bin/sh, /scripts/tailscale-entrypoint.sh]
     environment:
       TS_HOSTNAME: ${TS_HOSTNAME:-cc-dev}
       TS_STATE_DIR: /var/lib/tailscale
@@ -96,7 +101,12 @@ services:
       TS_USERSPACE: "true"
       TS_ACCEPT_DNS: "false"
       TS_SERVE_CONFIG: /config/serve.json
+      # Private address only: unreachable from the outbound network.
+      TS_SOCKS5_SERVER: 172.30.0.3:1055
+      SOCKS5_PORT: "1055"
+      SOCKS5_CLIENTS: 172.30.0.2 172.30.0.4
     volumes:
+      - ./scripts/tailscale-entrypoint.sh:/scripts/tailscale-entrypoint.sh:ro
       - type: bind
         source: ./tailscale/state
         target: /var/lib/tailscale

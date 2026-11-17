@@ -14,6 +14,7 @@ flowchart LR
         PA[dev-pennsylvania] -->|默认路由| P1[proxy-pennsylvania]
         CA[dev-california] -->|默认路由| P2[proxy-california]
         TS[tailscale] -->|SSH| PA
+        P1 & P2 -->|tailnet 地址| TS
     end
     LW -. bind mount .-> PA & CA
     GIT -. bind mount .-> PA & CA
@@ -26,7 +27,7 @@ flowchart LR
 |---|---|---|
 | `dev-pennsylvania`、`dev-california` | 仅私网（`.10`、`.11`） | 开发机：开发工具、SSH、远程桌面 |
 | `proxy-pennsylvania`、`proxy-california` | 私网（`.2`、`.4`）+ 出口网络 | 各自开发机的透明网关：TCP 代理、DNS、入站转发 |
-| `tailscale` | 私网（`.3`）+ 出口网络 | 从 tailnet 转发 SSH 到 `dev-pennsylvania:22` |
+| `tailscale` | 私网（`.3`）+ 出口网络 | 从 tailnet 转发 SSH 到 `dev-pennsylvania:22`；为网关提供访问 tailnet 的 SOCKS5 出口 |
 | `*-network-init` | 临时共享对应开发机的网络命名空间 | 设置默认路由和 DNS 防绕过规则，然后退出 |
 
 开发机挂载的 Mac 目录都放在和 Mac 相同的路径上：工作区副本挂到 `WORKSPACE_DIR`，git 数据挂到 `RUNTIME_DIR/git`，下载目录挂到 `DOWNLOADS_DIR`，配置了 `HOST_SCREENSHOTS_PATH` 时截图目录也只读挂到同一路径（目录不存在就不挂，由 `cc-runtime` 在调用 Compose 时生成叠加配置）；家目录里的 `~/workspace`、`~/Downloads` 是指向它们的链接。这样 git 记下的路径、使用者给出的 Mac 路径在开发机上都能直接用，原因见 [工作区](workspace.md#为什么是两棵树)。
@@ -57,7 +58,11 @@ flowchart LR
 
 ### Tailscale
 
-`tailscale` 以 userspace 模式运行，不需要 TUN、`NET_ADMIN` 或宿主机端口。它通过 Tailscale Serve 把 tailnet 内的 TCP 22 转发到 `dev-pennsylvania:22`，SSH 认证由开发机的 OpenSSH 完成；不启用 Tailscale SSH、Funnel、子网路由或出口节点。登录状态在 `tailscale/state/`，重建后复用同一设备身份。
+`tailscale` 以 userspace 模式运行，不需要 TUN 或宿主机端口，设备名为 `TS_HOSTNAME`（默认 `cc-dev`）。不启用 Tailscale SSH、Funnel、子网路由或出口节点。登录状态在 `tailscale/state/`，重建后复用同一设备身份。
+
+- **入站**：Tailscale Serve 把 tailnet 内的 TCP 22 转发到 `dev-pennsylvania:22`，SSH 认证由开发机的 OpenSSH 完成。
+- **出站**：容器在私网地址 `172.30.0.3:1055` 上开一个 SOCKS5 监听（`TS_SOCKS5_SERVER`）。网关把发往 `100.64.0.0/10` 的 TCP 连接交给它（规则里的 `tailnet` 代理），两台开发机因此都能按 IP 访问 tailnet 设备，在 tailnet 里的身份是 `cc-dev`，可以用 ACL 限制。`tailscale` 停止时这些连接失败，不会改走代理链或 Mac。只支持 TCP；开发机的 DNS 不解析 MagicDNS 名字。
+- **只有网关能用这个监听。** 开发机和 `tailscale` 在同一私网，可以不经网关直接连到它；而 SOCKS5 监听对非 tailnet 地址会直接拨出，等于一条绕过网关的出口。所以容器启动时（`scripts/tailscale-entrypoint.sh`）用 iptables 只放行两个网关的地址，为此它持有 `NET_ADMIN`。开发机仍然没有网络权限。
 
 ### 可见性边界
 

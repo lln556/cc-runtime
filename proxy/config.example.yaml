@@ -38,6 +38,13 @@ proxies:
     dialer-proxy: residential-upstream
   # ==== END GATEWAY-SPECIFIC ====
 
+  # Tailnet access via the tailscale service's SOCKS5 listener (TCP only).
+  - name: tailnet
+    type: socks5
+    server: 172.30.0.3
+    port: 1055
+    udp: false
+
 proxy-groups:
   # Rules and DNS refer only to "egress"; each gateway points it at its own node.
   # ==== GATEWAY-SPECIFIC: egress groups ====
@@ -122,6 +129,8 @@ tunnels:
 # ==== END GATEWAY-SPECIFIC ====
 
 rules:
+  # Tailnet (Tailscale CGNAT range) through the tailscale service; no fallback.
+  - IP-CIDR,100.64.0.0/10,tailnet,no-resolve
   - DOMAIN-SUFFIX,aliyuncs.com,DIRECT
   - IP-CIDR,8.154.36.79/32,DIRECT,no-resolve
   # Single host that must not traverse the proxy chain (fill in the real IP).

@@ -84,6 +84,7 @@
 | `dev-california` | `ssh -p 2223 dev@127.0.0.1` | `127.0.0.1:5902` | `http://127.0.0.1:6081/vnc.html` |
 
 - 经 Tailscale：`ssh dev@cc-dev`（设备名由 `TS_HOSTNAME` 设置），只开放 SSH，其他端口用 SSH 端口转发。
+- 从开发机到 tailnet：两台开发机都能按 IP（`100.x.y.z`）访问 tailnet 设备的 TCP 端口，经 `tailscale` 容器出去，不支持 MagicDNS 名字。
 - 从开发机到 Mac：Mac 开启「远程登录」后，`ssh -p 10023 <Mac 用户名>@<网关 IP>`（`dev-pennsylvania` 为 `172.30.0.2`，`dev-california` 为 `172.30.0.4`）。
 - 网关控制 API：`127.0.0.1:19090`（`proxy-pennsylvania`）、`127.0.0.1:19091`（`proxy-california`），密钥为 `PASSWORD`。
 

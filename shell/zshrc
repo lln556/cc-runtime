@@ -6,9 +6,8 @@
 # Environment
 #
 
-# Go 在 /usr/local/go/bin，go install 的程序在 ~/go/bin
-# Rust 在 ~/.cargo/bin，Claude Code 在 ~/.local/bin
-export PATH="/usr/local/go/bin:$HOME/go/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+# Claude Code 在 ~/.local/bin
+export PATH="$HOME/.local/bin:$PATH"
 
 # 镜像已生成 en_US.UTF-8；这里再导出一次，防止被外部环境覆盖成不存在的 locale。
 export LANG=en_US.UTF-8
@@ -76,24 +75,9 @@ unset key
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 (( ! ${+functions[p10k]} )) || p10k finalize
 
-# zoxide：z 跳转目录，zi 交互选择。需要在 compinit 之后初始化。
-eval "$(zoxide init zsh)"
-
-# fzf：Ctrl-R 搜索历史，Ctrl-T 搜索文件
-if (( ${+commands[fzf]} )); then
-  if fzf --zsh >/dev/null 2>&1; then
-    source <(fzf --zsh)
-  elif [[ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]]; then
-    source /usr/share/doc/fzf/examples/key-bindings.zsh
-    [[ -f /usr/share/doc/fzf/examples/completion.zsh ]] && source /usr/share/doc/fzf/examples/completion.zsh
-  fi
-fi
-
 alias claude="claude --dangerously-skip-permissions"
 alias zshc="vim ~/.zshrc"
 alias zshcc="exec zsh"
-alias nload="bash -c 'nload -u H'"
-alias j="zi"
 alias gcm="git commit -m "
 
 # Claude Code 的 Bash 工具（CLAUDECODE=1）按 bash 的习惯执行命令：未加引号的变量

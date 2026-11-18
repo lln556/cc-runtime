@@ -1,6 +1,6 @@
 // Package seed 用已有开发机的家目录初始化新机器的家目录，但不带它的身份。
 //
-// 复制工具、工具链、包缓存、shell 和编辑器配置，以及使用者选择共享的工具凭据
+// 复制使用者安装的工具、shell 和编辑器配置，以及使用者选择共享的工具凭据
 // （Credentials）。从不复制机器身份：SSH 主机密钥、machine-id、遥测 ID、整个
 // ~/.claude 目录和 ~/.claude.json、历史和会话状态。新机器有自己的 SSH 主机密钥、
 // machine-id 和 Claude 登录。
@@ -23,18 +23,15 @@ import (
 var Copy = []string{
 	// Shell 和编辑器配置（不含历史）。
 	".bashrc", ".bash_logout", ".profile", ".zshrc", ".zshenv", ".zimrc", ".zim",
-	".vimrc", ".face", ".face.icon",
+	".vimrc",
 	// Git 身份属于使用者，不属于机器。
 	".gitconfig", ".gitconfig-weimob",
 	// SSH：谁可以登录、信任哪些主机。客户端密钥见 Credentials。
 	".ssh/authorized_keys", ".ssh/config", ".ssh/known_hosts",
-	// 使用者安装的工具和运行时。
-	".local/bin", ".local/lib", ".local/share/uv", ".local/share/ms-playwright",
-	// 工具链和包缓存（只有内容，没有身份）。
-	".rustup", ".cargo", "go/pkg", ".bun", ".npm/_cacache", ".local/share/pnpm",
+	// 使用者安装的工具。语言工具链和包缓存在 Mac 上，开发机里不装。
+	".local/bin", ".local/lib",
 	// 不含凭据的工具偏好。
-	".config/btop", ".config/gh/config.yml", ".config/user-dirs.dirs",
-	".config/user-dirs.locale", ".config/mimeapps.list",
+	".config/gh/config.yml",
 }
 
 // Credentials 是使用者选择在开发机之间共享的账号凭据（2026-11-12）。从不覆盖已有文件。
@@ -44,13 +41,6 @@ var Credentials = []string{
 	".ssh/id_ed25519", ".ssh/id_ed25519.pub", ".ssh/id_rsa", ".ssh/id_rsa.pub",
 }
 
-// Exclude 复制后从目标里删除（位于复制过去的目录树内）。
-var Exclude = []string{
-	".local/share/uv/credentials",
-	".cargo/credentials", ".cargo/credentials.toml",
-	".npm/_cacache/tmp",
-}
-
 // NotCopied 从不复制；列出来让这个决定明确、可审阅。
 var NotCopied = [][2]string{
 	{".claude.json", "Claude 的 userID、machineID 和 oauthAccount"},
@@ -58,8 +48,8 @@ var NotCopied = [][2]string{
 	{".aliyun", "遥测实例 ID 和日志（不含凭据）"},
 	{".config/go/telemetry", "Go 遥测状态"},
 	{".local/state, .config/herdr, .servercc", "会话状态"},
-	{".local/share/zoxide, .zhistory, .viminfo", "使用历史"},
-	{".local/share/pki, .Xauthority, .config/tigervnc", "本机密钥（会重新生成）"},
+	{".zhistory, .viminfo", "使用历史"},
+	{".local/share/pki", "本机密钥（会重新生成）"},
 	{".zcompdump*, .zcompcache", "可重新生成的缓存"},
 }
 
@@ -142,17 +132,6 @@ func Seed(source, destination string, opts Options) error {
 		if !opts.DryRun {
 			if err := clone(filepath.Join(src, rel), filepath.Join(dst, rel)); err != nil {
 				return err
-			}
-		}
-	}
-	for _, rel := range Exclude {
-		path := filepath.Join(dst, rel)
-		if present(path) {
-			out("删除  " + rel)
-			if !opts.DryRun {
-				if err := os.RemoveAll(path); err != nil {
-					return err
-				}
 			}
 		}
 	}

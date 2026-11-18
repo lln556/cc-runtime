@@ -5,6 +5,7 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
+      - claude-code/**
       - scripts/entrypoint.sh
       - shell/**
       - .github/workflows/publish-image.yml

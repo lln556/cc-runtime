@@ -123,14 +123,6 @@ tunnels:
     address: 0.0.0.0:10022
     target: 172.30.0.10:22
     proxy: DIRECT
-  - network: [tcp]
-    address: 0.0.0.0:15901
-    target: 172.30.0.10:5901
-    proxy: DIRECT
-  - network: [tcp]
-    address: 0.0.0.0:16080
-    target: 172.30.0.10:6080
-    proxy: DIRECT
 # ==== END GATEWAY-SPECIFIC ====
 
 rules:

@@ -48,10 +48,6 @@ services:
       - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/remote-shell/dev-pennsylvania", target: /var/lib/cc-runtime/remote-shell, read_only: true}
       - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp"}
       - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
-      # Claude Code system settings (shell, SessionStart hook) and CLAUDE.md.
-      # Temporary mounts; they move into the image with the image slimming.
-      - {<<: *bind, source: ./claude-code/managed-settings.json, target: /etc/claude-code/managed-settings.json, read_only: true}
-      - {<<: *bind, source: ./claude-code/CLAUDE.md, target: /etc/claude-code/CLAUDE.md, read_only: true}
       - type: volume
         source: cache
         target: /home/dev/.cache
@@ -93,10 +89,6 @@ services:
       - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/remote-shell/dev-california", target: /var/lib/cc-runtime/remote-shell, read_only: true}
       - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-california/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-california/tmp"}
       - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
-      # Claude Code system settings (shell, SessionStart hook) and CLAUDE.md.
-      # Temporary mounts; they move into the image with the image slimming.
-      - {<<: *bind, source: ./claude-code/managed-settings.json, target: /etc/claude-code/managed-settings.json, read_only: true}
-      - {<<: *bind, source: ./claude-code/CLAUDE.md, target: /etc/claude-code/CLAUDE.md, read_only: true}
       - type: volume
         source: cache
         target: /home/dev/.cache
@@ -166,8 +158,6 @@ services:
     ports:
       - "127.0.0.1:19090:9090"
       - "127.0.0.1:2222:10022"
-      - "127.0.0.1:5901:15901"
-      - "127.0.0.1:6080:16080"
     healthcheck:
       test: [CMD-SHELL, "nc -z 127.0.0.1 9090 && nc -z 127.0.0.1 53"]
       interval: 5s
@@ -203,10 +193,8 @@ services:
     ports:
       - "127.0.0.1:19091:9090"
       - "127.0.0.1:17890:7890"
-      # dev-california SSH / VNC / noVNC via fixed DIRECT tunnels.
+      # dev-california SSH via a fixed DIRECT tunnel.
       - "127.0.0.1:2223:10022"
-      - "127.0.0.1:5902:15901"
-      - "127.0.0.1:6081:16080"
     healthcheck:
       test: [CMD-SHELL, "nc -z 127.0.0.1 9090 && nc -z 127.0.0.1 53"]
       interval: 5s

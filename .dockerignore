@@ -1,5 +1,6 @@
 # The image needs only these; everything else (credentials, runtime state,
 # per-machine homes) stays out of the build context.
 *
+!claude-code/
 !scripts/entrypoint.sh
 !shell/

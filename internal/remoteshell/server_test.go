@@ -131,34 +131,23 @@ func TestRunRejects(t *testing.T) {
 	}
 }
 
-func TestMissingCwdFallsBack(t *testing.T) {
+func TestMissingCwdIsRejectedWithHelp(t *testing.T) {
 	server, addr := startServer(t)
-	fallback := t.TempDir()
-	server.FallbackDir = fallback
-	real, _ := filepath.EvalSymlinks(fallback)
-	sub := filepath.Join(fallback, "sub")
-	os.Mkdir(sub, 0o755)
-	realSub, _ := filepath.EvalSymlinks(sub)
-	cwdFile := filepath.Join(t.TempDir(), "claude-x-cwd")
-	// 不 cd：在后备目录执行并提示，cwd 写回为后备目录。
-	req := request(t, "")
+	server.SharedDirs = []string{"/Users/x/workspace", "/Users/x/Downloads"}
+	req := request(t, "cd /tmp && touch should-not-exist")
 	req.Cwd = "/home/dev-does-not-exist"
-	command, _, _ := RewriteCwd(`eval 'pwd' && pwd -P >| /tmp/claude-x-cwd`)
-	req.Command, req.CaptureCwd = []byte(command), true
-	code, stdout, stderr := runCommand(t, addr, req, cwdFile)
-	data, _ := os.ReadFile(cwdFile)
-	if code != 0 || strings.TrimSpace(stdout) != real || !strings.Contains(stderr, "在 Mac 上不存在") ||
-		strings.TrimSpace(string(data)) != real {
-		t.Fatalf("%d %q %q %q", code, stdout, stderr, data)
+	code, stdout, stderr := runCommand(t, addr, req, "")
+	if code != 1 || stdout != "" {
+		t.Fatalf("%d %q", code, stdout)
 	}
-	// 命令里的 cd 照常生效。
-	command, _, _ = RewriteCwd(`eval 'cd sub' && pwd -P >| /tmp/claude-x-cwd`)
-	req.Command = []byte(command)
-	if code, _, _ := runCommand(t, addr, req, cwdFile); code != 0 {
-		t.Fatalf("退出码 %d", code)
+	for _, want := range []string{"命令没有执行", "/home/dev-does-not-exist", "cd 也没有用",
+		"cd /Users/x/workspace/<项目> && claude", "/Users/x/workspace、/Users/x/Downloads"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("提示里缺少 %q：%s", want, stderr)
+		}
 	}
-	if data, _ := os.ReadFile(cwdFile); strings.TrimSpace(string(data)) != realSub {
-		t.Fatalf("cwd %q", data)
+	if _, err := os.Stat("/tmp/should-not-exist"); err == nil {
+		t.Fatal("命令不应执行")
 	}
 }
 

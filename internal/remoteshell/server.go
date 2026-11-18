@@ -26,12 +26,12 @@ var DrainTimeout = time.Second
 
 // Server 接收开发机的命令并在本机执行。
 type Server struct {
-	Shell       string                            // 执行命令的 shell，例如 /bin/zsh
-	FallbackDir string                            // 工作目录在本机不存在时改用的目录；空则用家目录
-	Env         func() []string                   // 命令的基础环境（Mac 登录 shell 的快照）
-	Auth        func() (map[string]string, error) // token → 机器名，每个请求都重新读取
-	Logf        func(format string, args ...any)  // 日志
-	State       func(active []Active)             // 进行中的命令变化时调用（写状态文件）
+	Shell      string                            // 执行命令的 shell，例如 /bin/zsh
+	SharedDirs []string                          // 开发机和 Mac 共享的目录，写进工作目录不存在时的提示
+	Env        func() []string                   // 命令的基础环境（Mac 登录 shell 的快照）
+	Auth       func() (map[string]string, error) // token → 机器名，每个请求都重新读取
+	Logf       func(format string, args ...any)  // 日志
+	State      func(active []Active)             // 进行中的命令变化时调用（写状态文件）
 
 	mu     sync.Mutex
 	nextID int
@@ -117,6 +117,22 @@ func (s *Server) Shutdown(reason string) {
 	wg.Wait()
 }
 
+// missingCwdMessage 说明工作目录为什么不能用、怎么解决。
+func missingCwdMessage(cwd string, shared []string) string {
+	example := "<共享目录>/<项目>"
+	if len(shared) > 0 {
+		example = shared[0] + "/<项目>"
+	}
+	text := "remote-shell：命令没有执行。\n" +
+		"Bash 命令在宿主 Mac 上执行，但当前工作目录 " + cwd + " 只在开发机里有，Mac 上没有。\n" +
+		"在命令里 cd 也没有用：命令要先进入工作目录才能开始执行。\n" +
+		"请在开发机和 Mac 共享的目录里重新启动 Claude Code，例如：cd " + example + " && claude\n"
+	if len(shared) > 0 {
+		text += "共享目录：" + strings.Join(shared, "、") + "\n"
+	}
+	return strings.TrimSuffix(text, "\n")
+}
+
 func summarize(command string) string {
 	command = strings.Join(strings.Fields(command), " ")
 	if index := strings.Index(command, "eval '"); index >= 0 {
@@ -178,17 +194,11 @@ func (s *Server) handle(conn net.Conn) {
 		fail(2, "remote-shell：认证失败：%v", err)
 		return
 	}
-	// 工作目录在 Mac 上不存在（例如在开发机的家目录启动 Claude Code）时，不拒绝：
-	// 拒绝的话命令里的 cd 也没有机会执行，Bash 就完全不能用。改在 Mac 的家目录执行并提示；
-	// 命令结束后的 cwd 写回 Claude Code，之后的命令就在 Mac 上存在的目录里运行。
+	// 工作目录在 Mac 上不存在（例如在开发机的家目录启动 Claude Code）时拒绝执行，
+	// 不换到别的目录：那样 Bash 和容器里的 Read/Edit 看到的相对路径就对不上了。
 	if info, err := os.Stat(request.Cwd); err != nil || !info.IsDir() {
-		fallback := s.FallbackDir
-		if fallback == "" {
-			fallback, _ = os.UserHomeDir()
-		}
-		writer.Write(FrameStderr, []byte(fmt.Sprintf("remote-shell：工作目录 %s 在 Mac 上不存在，改在 %s 执行"+
-			"（Bash 在 Mac 上执行，相对路径以它为准；共享路径是工作区和下载目录）\n", request.Cwd, fallback)))
-		request.Cwd = fallback
+		writer.WriteJSON(FrameFail, Fail{Code: 1, Message: missingCwdMessage(request.Cwd, s.SharedDirs)})
+		return
 	}
 	s.mu.Lock()
 	closed := s.closed

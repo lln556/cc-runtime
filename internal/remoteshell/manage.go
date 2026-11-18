@@ -212,11 +212,12 @@ func Serve(cfg config.Config) error {
 	snapshot := &EnvSnapshot{Shell: "/bin/zsh", Home: home, Logf: logger.Printf,
 		CachePath: filepath.Join(cacheDir, "cc-runtime", "remote-shell", "env.json")}
 	server := &Server{
-		Shell: "/bin/zsh",
-		Env:   snapshot.Get,
-		Auth:  func() (map[string]string, error) { return Tokens(cfg) },
-		Logf:  logger.Printf,
-		State: StateFile(StatePath(cfg), os.Getpid(), config.Version),
+		Shell:      "/bin/zsh",
+		SharedDirs: []string{filepath.Clean(cfg.Workspace), filepath.Clean(cfg.Downloads)},
+		Env:        snapshot.Get,
+		Auth:       func() (map[string]string, error) { return Tokens(cfg) },
+		Logf:       logger.Printf,
+		State:      StateFile(StatePath(cfg), os.Getpid(), config.Version),
 	}
 	logger.Printf("启动：版本 %s，监听 127.0.0.1:%d，pid %d", config.Version, port, os.Getpid())
 	go snapshot.Get() // 提前生成环境快照，第一条命令不必等

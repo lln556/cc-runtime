@@ -58,7 +58,7 @@
 
    `*-network-init` 设置完路由后退出，`Exited (0)` 是正常状态。
 
-6. **Claude Code。** 按 [remote-shell](docs/remote-shell.md#和-claude-code-的衔接) 配置开发机的 Claude Code，然后 `cc-runtime check remote-shell`。
+6. **检查。** `cc-runtime check remote-shell`。开发机里 Claude Code 的 shell、临时目录、SessionStart hook 和 CLAUDE.md 由系统级设置提供（仓库的 `claude-code/`），家目录里不用配置，见 [remote-shell](docs/remote-shell.md#系统级设置)。
 
 7. **Tailscale（可选）。** `cc-runtime compose logs tailscale` 里有登录链接；登录后在管理后台为该设备关闭密钥过期。
 
@@ -95,6 +95,7 @@ Claude Code 要在工作区或下载目录里启动：开发机的 `/home/dev`�
 compose.yaml          服务、网络、挂载
 Dockerfile            开发镜像（构建上下文只有 scripts/entrypoint.sh 和 shell/）
 shell/                镜像内的 shell 配置
+claude-code/          开发机里 Claude Code 的系统级设置和 CLAUDE.md（挂到 /etc/claude-code）
 cmd/cc-runtime/       CLI 入口
 internal/             CLI 的各个部分（部署、remote-shell、定时任务、状态面板等）和测试
 scripts/install.sh    编译并安装 CLI

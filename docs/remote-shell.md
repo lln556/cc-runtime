@@ -71,18 +71,37 @@ cwd 由子进程的工作目录传递，环境变量由进程环境传递。客�
 | 环境变量 | 只带 `CLAUDECODE`、`CLAUDE_CODE_ENTRYPOINT`、`CLAUDE_CODE_SESSION_ID`、`AI_AGENT`、`GIT_EDITOR`、`EDITOR`；`CC_REMOTE_ENV_<名字>` 去掉前缀后带过去。PATH、HOME、TMPDIR、容器里的 socket 一律不带 |
 | 临时目录 | `CLAUDE_CODE_TMPDIR` 设为每机目录里的 `tmp/`（同路径挂载）：Write 写进 scratchpad 的脚本，Mac 上的命令也能运行 |
 
-开发机的 `~/.claude/settings.json` 要有：
+### 系统级设置
 
-```json
-{
-  "env": {
-    "CLAUDE_CODE_SHELL": "/opt/cc-runtime/bin/remote-shell/zsh",
-    "CLAUDE_CODE_TMPDIR": "<RUNTIME_DIR>/remote-shell/<机器>/tmp"
-  }
-}
-```
+开发机里 Claude Code 的接入配置放在系统级设置目录 `/etc/claude-code`，不放在家目录里：
 
-系统提示里的 `Platform` 仍是 linux，所以 `~/.claude/CLAUDE.md` 要说明 Bash 在 Mac 上执行、哪些路径两侧共享（`cc-runtime check remote-shell` 检查这两处）。家目录不由 cc-runtime 改写，这两个文件由使用者维护。
+| 文件 | 来源 | 内容 |
+| --- | --- | --- |
+| `managed-settings.json` | 仓库 `claude-code/`，只读挂载 | `env.CLAUDE_CODE_SHELL`、SessionStart hook |
+| `CLAUDE.md` | 仓库 `claude-code/`，只读挂载 | 执行环境的规则：Bash 在 Mac 上执行、哪些路径共享、在错误的目录启动时怎么办 |
+| `managed-settings.d/remote-shell.json` | 入口脚本按 compose 传入的 `CC_REMOTE_SHELL_TMPDIR` 写入 | `env.CLAUDE_CODE_TMPDIR`：它是 Mac 上的路径，因机器而异 |
+
+在 Claude Code 2.1.327 上实测：
+
+- 系统级设置的 `env` 覆盖使用者 `~/.claude/settings.json` 里的同名项，使用者改不回本地 shell；
+- `managed-settings.d/` 里的文件和 `managed-settings.json` 合并；
+- `/etc/claude-code/CLAUDE.md` 会被读进上下文；
+- hook 在容器里用 `/bin/sh -c` 执行，不经过 `CLAUDE_CODE_SHELL`，所以 hook 程序放在容器里。
+
+使用者的 `~/.claude/settings.json` 只放模型、主题这类个人设置。
+
+两个文件现在是单独挂载的，以后随镜像瘦身改为打进镜像。单文件挂载指向的是挂载时的那个文件：编辑器或同步工具用改名的方式替换文件后，要重建开发机才能看到新内容。
+
+### SessionStart hook
+
+系统提示里的 `Platform`、`OS Version` 写的是容器（Linux），模型会照着写出 GNU 风格的命令。`CLAUDE.md` 能说明这一点，但写不出准确的版本，也发现不了「在 Mac 上不存在的目录里启动」。所以会话开始时（包括 `/clear`、恢复、压缩之后）运行 `/opt/cc-runtime/bin/remote-shell/session-start`：
+
+1. 从 stdin 读 hook 输入里的 `cwd`，经 remote-shell 在这个目录里执行一次探测：`sw_vers`、`uname -m`，总时限 5 秒；
+2. 输出 `additionalContext`：Mac 的系统版本和架构，与 Mac 共享的目录、临时目录、开发机的容器名（来自 `client.json`）；
+3. 工作目录在 Mac 上不存在时，输出服务给的拒绝说明，要求先转告使用者；服务不可达时说明 Bash 会失败、不会改在容器里执行；
+4. 总是以 0 退出，不阻塞会话。
+
+hook 和客户端是同一个程序，按入口文件名分派（`remote-shell/zsh`、`remote-shell/session-start`）。
 
 ## 协议
 
@@ -135,7 +154,7 @@ launchd 启动的进程只有系统目录的 PATH，而每条命令都启动登�
    | `RUNTIME_DIR/remote-shell/<机器>/tmp` | 同路径 | 读写 | `CLAUDE_CODE_TMPDIR`。主要为 scratchpad：Write 在容器里写的脚本，Bash 在 Mac 上按同一路径执行 |
    | `RUNTIME_DIR/bin` | `/opt/cc-runtime/bin` | 只读 | linux 版客户端；放在 `bin` 子目录，不遮住镜像里 `/opt/cc-runtime` 的 shell 配置 |
 
-5. 配置开发机的 `~/.claude/settings.json` 和 `CLAUDE.md`（见上），运行 `cc-runtime check remote-shell`。它检查服务和版本、tunnel、挂载、Claude Code 配置，并在开发机里端到端执行 `uname -s; launchctl managername`，应得到 `Darwin Aqua`。
+5. `cc-runtime check remote-shell`：检查服务和版本、tunnel、挂载、开发机里的系统级设置，运行一次 SessionStart hook，并在开发机里端到端执行 `uname -s; launchctl managername`，应得到 `Darwin Aqua`。
 
 LaunchAgent 的 `ProcessType` 是 `Interactive`：默认的后台类型会被降低 CPU/IO 优先级。服务日志在 `RUNTIME_DIR/logs/remote-shell.log`（连接、拒绝、每条命令的退出码和用时，命令截断到 160 字符；不记录输出）；进行中的命令写在 `RUNTIME_DIR/state/remote-shell.json`。
 

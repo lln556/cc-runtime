@@ -64,8 +64,7 @@ func cmdRemoteShell(cfg config.Config, args []string) (int, error) {
 	}
 	table.Add("服务", service)
 	table.Add("监听", fmt.Sprintf("127.0.0.1:%d", port))
-	machines := remoteshell.Machines(cfg)
-	table.Add("开发机", strings.Join(machines, ", "))
+	table.Add("开发机", strings.Join(remoteshell.PreparedMachines(cfg), ", "))
 	table.Add("进行中", fmt.Sprint(len(state.Active)))
 	table.Print()
 	for _, a := range state.Active {
@@ -112,21 +111,21 @@ func checkRemoteShell(cfg config.Config) (int, error) {
 	if _, err := os.Stat(binary); err != nil {
 		r.fail("没有开发机用的二进制 %s；在 Mac 上运行 scripts/install.sh", binary)
 	}
-	machines := remoteshell.Machines(cfg)
-	if len(machines) == 0 {
-		r.warn("没有启用 remote-shell 的开发机（.env 的 REMOTE_SHELL_MACHINES）")
-	}
 	project, err := deploy.Model(cfg)
 	if err != nil {
 		return 0, err
 	}
-	for _, machine := range machines {
-		service, ok := project.Services[machine]
-		if !ok {
-			r.fail("%s 不是 compose.yaml 里的服务", machine)
+	containers, err := deploy.RunningContainers(project)
+	if err != nil {
+		return 0, err
+	}
+	legacy := deploy.LegacyMachines(containers, filepath.Join(cfg.Runtime, "linux-workspace"))
+	for _, machine := range deploy.DevServices(project) {
+		if legacy[machine] {
+			r.warn("%s：还挂着 Linux 副本，迁移前不检查（见 docs/local/redesign/03）", machine)
 			continue
 		}
-		checkMachine(cfg, r, project, machine, service, port)
+		checkMachine(cfg, r, project, machine, project.Services[machine], port)
 	}
 	return exitCode(r.failed), nil
 }
@@ -148,8 +147,8 @@ func checkMachine(cfg config.Config, r *checkReport, project deploy.Project, mac
 	if _, err := os.Stat(remoteshell.ClientConfigPath(cfg, machine)); err != nil {
 		r.fail("%s：没有 %s；用 cc-runtime up %s 生成", machine, remoteshell.ClientConfigPath(cfg, machine), machine)
 	}
-	if mount := deploy.MountFor(service, filepath.Clean(cfg.Workspace)); mount != nil && filepath.Clean(mount.Source) == filepath.Clean(cfg.LinuxWorkspace()) {
-		r.fail("%s：工作区仍挂着 Linux 副本", machine)
+	if mount := deploy.MountFor(service, filepath.Clean(cfg.Workspace)); mount == nil || filepath.Clean(mount.Source) != filepath.Clean(cfg.Workspace) {
+		r.fail("%s：compose.yaml 里的工作区挂载源应为 %s", machine, cfg.Workspace)
 	}
 	if home := deploy.MountFor(service, deploy.HomeTarget); home != nil {
 		checkClaudeConfig(cfg, r, machine, home.Source)

@@ -40,7 +40,8 @@ if [ ! -e "/workspace" ] && [ ! -L "/workspace" ]; then
 fi
 sudo chown -h dev:dev /workspace
 
-README_FILE="$WORKSPACE_DIR/环境说明.md"
+# 写在家目录：工作区是 Mac 的目录，不往里放开发机的文件。
+README_FILE="/home/dev/环境说明.md"
 if [ ! -f "$README_FILE" ]; then
     echo "📝 Generating welcome file 环境说明.md..."
     cat <<'EOF' | sudo tee "$README_FILE" > /dev/null
@@ -88,7 +89,7 @@ if [ ! -f "$README_FILE" ]; then
 
 ## 目录结构
 - `/home/dev`：您的主目录。
-- 工作区：挂在和 Mac 工作区相同的路径上，与 Mac 双向同步。
+- 工作区：直接挂载 Mac 的工作区，路径和 Mac 相同。Claude Code 的 Bash 命令经 remote-shell 在 Mac 上执行。
 - `/home/dev/workspace`、`/workspace`：指向工作区的符号链接。
 - 下载目录：挂在和 Mac 相同的路径上，`/home/dev/Downloads` 是指向它的符号链接。
 

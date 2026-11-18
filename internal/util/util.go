@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,35 +102,6 @@ func Run(args []string, opts Opts) (Result, error) {
 		return result, err
 	}
 	return result, nil
-}
-
-// Walk 自顶向下遍历 root（root 本身是符号链接时跟随它，其余链接不跟随）。
-// fn 收到斜杠分隔的相对路径（root 为 ""）；对目录返回 fs.SkipDir 可剪枝。
-func Walk(root string, fn func(rel string, d fs.DirEntry) error) error {
-	if real, err := filepath.EvalSymlinks(root); err == nil {
-		root = real
-	}
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if path == root {
-				return err
-			}
-			return nil // 遍历中途消失或无权限的目录：跳过
-		}
-		rel, _ := filepath.Rel(root, path)
-		if rel == "." {
-			rel = ""
-		}
-		return fn(filepath.ToSlash(rel), d)
-	})
-}
-
-// Join 拼接相对路径；dir 为空时返回 name。
-func Join(dir, name string) string {
-	if dir == "" {
-		return name
-	}
-	return dir + "/" + name
 }
 
 // Lexists 判断路径是否存在（不跟随符号链接）。

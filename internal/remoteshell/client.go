@@ -16,8 +16,9 @@ import (
 const (
 	// ClientDir 是本机 remote-shell 目录在开发机里的固定挂载点，里面有 client.json。
 	ClientDir = "/var/lib/cc-runtime/remote-shell"
-	// BinDir 是 RUNTIME_DIR/bin 在开发机里的挂载点。
-	BinDir = "/opt/cc-runtime"
+	// BinDir 是 RUNTIME_DIR/bin 在开发机里的挂载点。放在 bin 子目录，不遮住镜像里
+	// /opt/cc-runtime 下的 shell 配置。
+	BinDir = "/opt/cc-runtime/bin"
 	// ShellPath 是给 CLAUDE_CODE_SHELL 用的路径。Claude Code 只接受路径里含 bash 或 zsh 的 shell，
 	// 所以名字放在目录上。
 	ShellPath = BinDir + "/remote-shell/zsh"
@@ -50,7 +51,7 @@ func loadClientConfig() (ClientConfig, error) {
 	var cfg ClientConfig
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return cfg, fmt.Errorf("读不到 %s：%w；这台开发机没有启用 remote-shell（.env 的 REMOTE_SHELL_MACHINES），或需要用 cc-runtime up 重建", path, err)
+		return cfg, fmt.Errorf("读不到 %s：%w；在 Mac 上用 cc-runtime up 重建这台开发机", path, err)
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("%s 格式错误：%w", path, err)

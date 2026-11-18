@@ -15,8 +15,9 @@ x-bind: &bind
 services:
   # Development machine dev-pennsylvania; egress via proxy-pennsylvania.
   # Each machine has its own home, SSH host keys and machine-id under
-  # dev-runtimes/<name>/. All machines share the Linux mirror of the workspace
-  # and the git store, mounted at the same paths as on the Mac (see docs/workspace.md).
+  # dev-runtimes/<name>/. The Mac workspace is mounted directly at the same path;
+  # Claude Code's Bash commands run on the Mac through remote-shell
+  # (see docs/remote-shell.md).
   dev-pennsylvania:
     <<: *dev-machine
     hostname: ab58b8f06991
@@ -35,11 +36,19 @@ services:
       - {<<: *bind, source: ./dev-runtimes/dev-pennsylvania/machine-id, target: /etc/machine-id, read_only: true}
       - {<<: *bind, source: ./dev-runtimes/dev-pennsylvania/machine-id, target: /var/lib/dbus/machine-id, read_only: true}
       - {<<: *bind, source: ./dev-runtimes/dev-pennsylvania/home, target: /home/dev}
-      # Same path as the Mac workspace, so paths git records (worktrees,
-      # submodules) resolve on both sides. ~/workspace is a link to it.
-      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/linux-workspace", target: "${WORKSPACE_DIR:?Set WORKSPACE_DIR in .env}"}
-      - {<<: *bind, source: "${RUNTIME_DIR}/git", target: "${RUNTIME_DIR}/git"}
+      # The Mac workspace at the same path, so paths are identical for Read/Edit
+      # in the container and Bash on the Mac. ~/workspace is a link to it.
+      - {<<: *bind, source: "${WORKSPACE_DIR:?Set WORKSPACE_DIR in .env}", target: "${WORKSPACE_DIR}"}
+      # Transitional: repositories still externalized point their .git here.
+      # Remove after the migration (docs/local/redesign/03).
+      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/git", target: "${RUNTIME_DIR}/git"}
       - {<<: *bind, source: "${DOWNLOADS_DIR:?Set DOWNLOADS_DIR in .env}", target: "${DOWNLOADS_DIR}"}
+      # remote-shell: client.json (read-only, at the client's fixed path), the
+      # shared temp dir for CLAUDE_CODE_TMPDIR (same path as on the Mac), and
+      # the Linux client built by scripts/install.sh.
+      - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania", target: /var/lib/cc-runtime/remote-shell, read_only: true}
+      - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp"}
+      - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
       - type: volume
         source: cache
         target: /home/dev/.cache
@@ -69,11 +78,19 @@ services:
       - {<<: *bind, source: ./dev-runtimes/dev-california/machine-id, target: /etc/machine-id, read_only: true}
       - {<<: *bind, source: ./dev-runtimes/dev-california/machine-id, target: /var/lib/dbus/machine-id, read_only: true}
       - {<<: *bind, source: ./dev-runtimes/dev-california/home, target: /home/dev}
-      # Same path as the Mac workspace, so paths git records (worktrees,
-      # submodules) resolve on both sides. ~/workspace is a link to it.
-      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/linux-workspace", target: "${WORKSPACE_DIR:?Set WORKSPACE_DIR in .env}"}
-      - {<<: *bind, source: "${RUNTIME_DIR}/git", target: "${RUNTIME_DIR}/git"}
+      # The Mac workspace at the same path, so paths are identical for Read/Edit
+      # in the container and Bash on the Mac. ~/workspace is a link to it.
+      - {<<: *bind, source: "${WORKSPACE_DIR:?Set WORKSPACE_DIR in .env}", target: "${WORKSPACE_DIR}"}
+      # Transitional: repositories still externalized point their .git here.
+      # Remove after the migration (docs/local/redesign/03).
+      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/git", target: "${RUNTIME_DIR}/git"}
       - {<<: *bind, source: "${DOWNLOADS_DIR:?Set DOWNLOADS_DIR in .env}", target: "${DOWNLOADS_DIR}"}
+      # remote-shell: client.json (read-only, at the client's fixed path), the
+      # shared temp dir for CLAUDE_CODE_TMPDIR (same path as on the Mac), and
+      # the Linux client built by scripts/install.sh.
+      - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-california", target: /var/lib/cc-runtime/remote-shell, read_only: true}
+      - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-california/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-california/tmp"}
+      - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
       - type: volume
         source: cache
         target: /home/dev/.cache

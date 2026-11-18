@@ -21,9 +21,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/zeke-chin/cc-runtime/internal/config"
-	"github.com/zeke-chin/cc-runtime/internal/dedupe"
-	"github.com/zeke-chin/cc-runtime/internal/gitstore"
-	"github.com/zeke-chin/cc-runtime/internal/mutagen"
 	"github.com/zeke-chin/cc-runtime/internal/util"
 )
 
@@ -52,69 +49,8 @@ func (j Job) ScheduleText() string {
 	return fmt.Sprintf("每 %d 秒", j.Interval)
 }
 
-// sessionState 可在测试中替换。
-var sessionState = func() (mutagen.SessionState, error) { return mutagen.Query(config.Session) }
-
-func runDedupe(cfg config.Config) (int, any, error) {
-	state, err := sessionState()
-	if err != nil {
-		return 1, nil, err
-	}
-	if !state.OK() {
-		// 两侧可能本来就不一致时，不碰副本。
-		status := state.Status
-		if status == "" {
-			status = "未运行"
-		}
-		return 2, map[string]any{"skipped": fmt.Sprintf("同步会话状态不正常（%s，冲突 %d）", status, state.Conflicts)}, nil
-	}
-	var samples []string
-	stats, err := dedupe.Run(cfg, dedupe.RunOptions{MinSize: dedupe.MiB, QuietHours: 24, Log: func(m string) {
-		if len(samples) < 5 {
-			samples = append(samples, m)
-		}
-	}})
-	var unsupported *dedupe.Unsupported
-	if errors.As(err, &unsupported) {
-		return 3, map[string]any{"error": unsupported.Msg}, nil
-	}
-	if err != nil {
-		return 1, nil, err
-	}
-	stats.ErrorSamples = samples
-	if stats.Errors > 0 {
-		return 1, stats, nil
-	}
-	return 0, stats, nil
-}
-
-func runExternalize(cfg config.Config) (int, any, error) {
-	layout := gitstore.FromConfig(cfg)
-	if err := layout.Check(); err != nil {
-		return 1, nil, err
-	}
-	results := gitstore.ExternalizeAll(layout, false)
-	moved, repaired, skipped := []string{}, []string{}, 0
-	for _, r := range results {
-		switch {
-		case r.Changed && r.Repair:
-			repaired = append(repaired, r.Rel)
-		case r.Changed:
-			moved = append(moved, r.Rel)
-		default:
-			skipped++
-		}
-	}
-	return 0, map[string]any{"externalized": moved, "repaired": repaired, "skipped": skipped}, nil
-}
-
 // Jobs 是任务登记表，按显示顺序排列。
-var Jobs = []Job{
-	{Name: "dedupe", Description: "在两棵目录树之间共享相同文件（文件系统克隆）",
-		Run: runDedupe, Calendar: &Calendar{Hour: 4, Minute: 0}},
-	{Name: "externalize", Description: "把新仓库的 git 数据移到共享目录，修正只在一侧有效的 worktree/子模块路径",
-		Run: runExternalize, Interval: 300},
-}
+var Jobs = []Job{}
 
 func Names() []string {
 	names := make([]string, len(Jobs))

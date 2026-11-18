@@ -204,7 +204,7 @@ func TestScreenshotsMount(t *testing.T) {
 	cfg := testutil.MakeConfig(t, base, "")
 	shots := filepath.Join(base, "shots")
 	inDownloads := filepath.Join(cfg.Downloads, "shots")
-	for _, dir := range []string{shots, inDownloads} {
+	for _, dir := range []string{shots, inDownloads, filepath.Join(cfg.Runtime, "shots")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +220,7 @@ func TestScreenshotsMount(t *testing.T) {
 		{"在下载目录里", inDownloads, "", false},
 		{"在工作区里", cfg.Workspace, "", false},
 		{"包含工作区", base, "", true},
-		{"在 RUNTIME_DIR 里", cfg.GitStore(), "", true},
+		{"在 RUNTIME_DIR 里", filepath.Join(cfg.Runtime, "shots"), "", true},
 	}
 	for _, c := range cases {
 		cfg.Screenshots = c.path
@@ -285,16 +285,12 @@ func TestComposeAddsScreenshotsOverlayForDevMachines(t *testing.T) {
 	}
 }
 
-func TestOverlayForRemoteShellMachines(t *testing.T) {
-	base := t.TempDir()
-	cfg := testutil.MakeConfig(t, base, "")
+func TestGatewayIP(t *testing.T) {
 	gateway := "172.30.0.4"
 	project := Project{Name: "p", Services: map[string]Service{
-		"dev-a": {Volumes: []Mount{{Type: "bind", Source: "/k", Target: SSHTarget},
-			{Type: "bind", Source: cfg.LinuxWorkspace(), Target: cfg.Workspace}}},
+		"dev-a":              {Volumes: []Mount{{Type: "bind", Source: "/k", Target: SSHTarget}}},
 		"dev-b":              {Volumes: []Mount{{Type: "bind", Source: "/k2", Target: SSHTarget}}},
 		"dev-a-network-init": {Environment: map[string]*string{"GATEWAY_IP": &gateway}},
-		"proxy-a":            {},
 	}}
 	if got := GatewayIP(project, "dev-a"); got != gateway {
 		t.Fatalf("网关 %s", got)
@@ -302,25 +298,25 @@ func TestOverlayForRemoteShellMachines(t *testing.T) {
 	if got := GatewayIP(project, "dev-b"); got != "172.30.0.2" {
 		t.Fatalf("默认网关 %s", got)
 	}
-	overlay, err := buildOverlay(cfg, project, "", []string{"dev-a"})
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestLegacyMachinesStillMountTheLinuxCopy(t *testing.T) {
+	container := func(service, source string) Container {
+		var c Container
+		c.Config.Labels = map[string]string{"com.docker.compose.service": service}
+		c.Mounts = append(c.Mounts, struct {
+			Type        string `json:"Type"`
+			Source      string `json:"Source"`
+			Destination string `json:"Destination"`
+			RW          bool   `json:"RW"`
+		}{Type: "bind", Source: source, Destination: "/Users/x/workspace", RW: true})
+		return c
 	}
-	services := overlay["services"].(map[string]any)
-	if _, ok := services["dev-b"]; ok || len(services) != 1 {
-		t.Fatalf("只应改 dev-a：%v", services)
-	}
-	text := fmt.Sprint(services["dev-a"])
-	for _, want := range []string{"target:" + cfg.Workspace, "source:" + util.Resolve(cfg.Workspace),
-		"target:/var/lib/cc-runtime/remote-shell", "target:/opt/cc-runtime", "read_only:true"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("缺少 %s：%s", want, text)
-		}
-	}
-	if strings.Contains(text, "linux-workspace") {
-		t.Fatalf("工作区不应再挂 Linux 副本：%s", text)
-	}
-	if _, err := buildOverlay(cfg, project, "", []string{"proxy-a"}); err == nil {
-		t.Fatal("非开发机应该报错")
+	got := LegacyMachines([]Container{
+		container("dev-a", "/Users/x/.cc-runtime/linux-workspace"),
+		container("dev-b", "/Users/x/workspace"),
+	}, "/Users/x/.cc-runtime/linux-workspace/")
+	if !got["dev-a"] || got["dev-b"] || len(got) != 1 {
+		t.Fatal(got)
 	}
 }

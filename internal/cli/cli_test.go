@@ -7,11 +7,11 @@ import (
 )
 
 func TestOptionsAndPositionalsMayInterleave(t *testing.T) {
-	fs := newFlags("git")
+	fs := newFlags("schedule")
 	all := fs.Bool("all", false, "")
 	dryRun := fs.Bool("dry-run", false, "")
-	got, err := parse("git", fs, []string{"externalize", "--dry-run", "a/b", "--all", "c"})
-	if err != nil || !*all || !*dryRun || !slices.Equal(got, []string{"externalize", "a/b", "c"}) {
+	got, err := parse("schedule", fs, []string{"install", "--dry-run", "a/b", "--all", "c"})
+	if err != nil || !*all || !*dryRun || !slices.Equal(got, []string{"install", "a/b", "c"}) {
 		t.Fatal(got, err)
 	}
 }
@@ -32,17 +32,17 @@ func TestWatchFlagHasOptionalSeconds(t *testing.T) {
 }
 
 func TestUnknownOptionIsReportedInChinese(t *testing.T) {
-	_, err := parse("dedupe", newFlags("dedupe"), []string{"--nope"})
+	_, err := parse("job", newFlags("job"), []string{"--nope"})
 	if err == nil || !strings.Contains(err.Error(), "未知选项") {
 		t.Fatal(err)
 	}
 }
 
 func TestChoose(t *testing.T) {
-	if _, err := choose("sync", "操作", []string{"bogus"}, "status", "create"); err == nil {
+	if _, err := choose("schedule", "操作", []string{"bogus"}, "status", "create"); err == nil {
 		t.Fatal("无效操作应报错")
 	}
-	if _, err := choose("sync", "操作", nil, "status"); err == nil {
+	if _, err := choose("schedule", "操作", nil, "status"); err == nil {
 		t.Fatal("缺少操作应报错")
 	}
 }

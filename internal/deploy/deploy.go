@@ -18,6 +18,7 @@ import (
 
 	"github.com/zeke-chin/cc-runtime/internal/config"
 	"github.com/zeke-chin/cc-runtime/internal/remoteshell"
+	"github.com/zeke-chin/cc-runtime/internal/ui"
 	"github.com/zeke-chin/cc-runtime/internal/util"
 )
 
@@ -98,8 +99,7 @@ func composeFiles(cfg config.Config) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	machines := remoteshell.Machines(cfg)
-	if dir == "" && len(machines) == 0 {
+	if dir == "" {
 		return []string{base}, nil
 	}
 	result, err := composeWith(cfg, []string{base}, true, false, "config", "--format", "json")
@@ -110,11 +110,7 @@ func composeFiles(cfg config.Config) ([]string, error) {
 	if err := json.Unmarshal([]byte(result.Stdout), &project); err != nil {
 		return nil, fmt.Errorf("无法解析 docker compose config 的输出：%w", err)
 	}
-	overlay, err := buildOverlay(cfg, project, dir, machines)
-	if err != nil {
-		return nil, err
-	}
-	data, err := json.MarshalIndent(overlay, "", "  ")
+	data, err := json.MarshalIndent(buildOverlay(cfg, project, dir), "", "  ")
 	if err != nil {
 		return nil, err
 	}
@@ -129,29 +125,15 @@ func composeFiles(cfg config.Config) ([]string, error) {
 	return []string{base, path}, nil
 }
 
-// buildOverlay 合并各项叠加配置。Compose 按挂载目标合并卷，所以 remote-shell 的工作区
-// 挂载会替换 compose.yaml 里同一目标上的 Linux 副本。
-func buildOverlay(cfg config.Config, project Project, screenshots string, machines []string) (map[string]any, error) {
-	devs := DevServices(project)
-	volumes := map[string][]any{}
-	if screenshots != "" {
-		// 源用真实路径；容器里用配置的路径，使用者粘贴的就是它。
-		mount := screenshotsVolume(screenshots, filepath.Clean(cfg.Screenshots))
-		for _, name := range devs {
-			volumes[name] = append(volumes[name], mount)
-		}
-	}
-	for _, machine := range machines {
-		if !slices.Contains(devs, machine) {
-			return nil, util.Errorf("REMOTE_SHELL_MACHINES 里的 %s 不是开发机；可选：%s", machine, strings.Join(devs, ", "))
-		}
-		volumes[machine] = append(volumes[machine], remoteshell.MachineOverlay(cfg, machine)...)
-	}
+// buildOverlay 是截图目录的叠加配置：在每台开发机里以相同路径只读挂载。
+func buildOverlay(cfg config.Config, project Project, screenshots string) map[string]any {
+	// 源用真实路径；容器里用配置的路径，使用者粘贴的就是它。
+	mount := screenshotsVolume(screenshots, filepath.Clean(cfg.Screenshots))
 	services := map[string]any{}
-	for name, list := range volumes {
-		services[name] = map[string]any{"volumes": list}
+	for _, name := range DevServices(project) {
+		services[name] = map[string]any{"volumes": []any{mount}}
 	}
-	return map[string]any{"services": services}, nil
+	return map[string]any{"services": services}
 }
 
 // GatewayIP 是开发机的网关地址：取自它的 network-init 服务（与 scripts/dev-network-init.sh 的默认值一致）。
@@ -286,6 +268,9 @@ func Inspect(ids []string) ([]Container, error) {
 	return containers, json.Unmarshal([]byte(result.Stdout), &containers)
 }
 
+// RunningContainers 是本项目运行中的容器。
+func RunningContainers(p Project) ([]Container, error) { return projectContainers(p) }
+
 func projectContainers(p Project) ([]Container, error) {
 	docker, err := require("docker")
 	if err != nil {
@@ -299,19 +284,29 @@ func projectContainers(p Project) ([]Container, error) {
 	return Inspect(strings.Fields(result.Stdout))
 }
 
-// runningOrphans 是本项目中服务已不在 compose.yaml 里的运行中容器。
-func runningOrphans(p Project) ([]Container, error) {
-	containers, err := projectContainers(p)
-	if err != nil {
-		return nil, err
-	}
+// orphanContainers 是本项目中服务已不在 compose.yaml 里的运行中容器。
+func orphanContainers(p Project, containers []Container) []Container {
 	var orphans []Container
 	for _, c := range containers {
 		if _, ok := p.Services[c.Config.Labels["com.docker.compose.service"]]; !ok {
 			orphans = append(orphans, c)
 		}
 	}
-	return orphans, nil
+	return orphans
+}
+
+// LegacyMachines 是运行中、仍把 Linux 副本挂作工作区的开发机（过渡期的旧部署）。
+// 重建会换成直接挂 Mac 工作区，所以只在使用者点名时才做。
+func LegacyMachines(containers []Container, linuxWorkspace string) map[string]bool {
+	result := map[string]bool{}
+	for _, c := range containers {
+		for _, m := range c.Mounts {
+			if filepath.Clean(m.Source) == filepath.Clean(linuxWorkspace) {
+				result[c.Config.Labels["com.docker.compose.service"]] = true
+			}
+		}
+	}
+	return result
 }
 
 func AddressConflicts(p Project, services []string, orphans []Container) []string {
@@ -639,10 +634,8 @@ func Prepare(cfg config.Config, p Project, services []string) error {
 		if err := initializeCache(p, s.Image, s, uid, gid); err != nil {
 			return err
 		}
-		if remoteshell.Enabled(cfg, name) {
-			if _, err := remoteshell.PrepareMachine(cfg, name, GatewayIP(p, name)); err != nil {
-				return err
-			}
+		if _, err := remoteshell.PrepareMachine(cfg, name, GatewayIP(p, name)); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -670,10 +663,30 @@ func Up(cfg config.Config, services []string, opts UpOptions) error {
 	if len(services) > 0 {
 		targets = WithHelpers(project, services)
 	}
-	orphans, err := runningOrphans(project)
+	containers, err := projectContainers(project)
 	if err != nil {
 		return err
 	}
+	skipped := LegacyMachines(containers, filepath.Join(cfg.Runtime, "linux-workspace"))
+	noDeps := len(services) > 0
+	for _, s := range services {
+		delete(skipped, s) // 明确点名的照常重建
+	}
+	if len(skipped) > 0 {
+		var names []string
+		for name := range skipped {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		targets = slices.DeleteFunc(targets, func(s string) bool {
+			return skipped[s] || skipped[strings.TrimSuffix(s, "-network-init")]
+		})
+		// 其他服务不能把跳过的机器作为依赖带起来。
+		noDeps = true
+		fmt.Println(ui.Yellow.S("跳过 "+strings.Join(names, ", ")) +
+			"：它还挂着 Linux 副本，迁移前不重建（见 docs/local/redesign/03）。确要重建就在命令里点名它。")
+	}
+	orphans := orphanContainers(project, containers)
 	if len(orphans) > 0 && !opts.AllowOrphans {
 		var names []string
 		for _, c := range orphans {
@@ -704,7 +717,7 @@ func Up(cfg config.Config, services []string, opts UpOptions) error {
 		return err
 	}
 	args := []string{"up", "-d"}
-	if len(services) > 0 {
+	if noDeps {
 		args = append(args, "--no-deps")
 	}
 	if opts.ForceRecreate {

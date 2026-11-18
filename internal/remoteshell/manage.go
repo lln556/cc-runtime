@@ -46,21 +46,9 @@ func Port(cfg config.Config) (int, error) {
 	return port, nil
 }
 
-// Machines 是启用 remote-shell 的开发机（.env 的 REMOTE_SHELL_MACHINES，逗号分隔）。
-func Machines(cfg config.Config) []string {
-	var names []string
-	for _, name := range strings.Split(cfg.Env["REMOTE_SHELL_MACHINES"], ",") {
-		if name = strings.TrimSpace(name); name != "" && !slices.Contains(names, name) {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
-func Enabled(cfg config.Config, machine string) bool { return slices.Contains(Machines(cfg), machine) }
-
-// MachineDir 是一台开发机的 remote-shell 目录：client.json 和共享的临时目录。
-// 它在开发机里挂在相同路径（临时目录要两侧通用），同时挂在 ClientDir（客户端从这里读配置）。
+// MachineDir 是一台开发机的 remote-shell 目录：client.json 和临时目录 tmp/。
+// 整个目录只读挂到开发机的 ClientDir（客户端从这里读配置）；tmp/ 另外可写地挂在相同路径，
+// 见 compose.yaml。
 func MachineDir(cfg config.Config, machine string) string {
 	return filepath.Join(cfg.Runtime, "remote-shell", machine)
 }
@@ -69,7 +57,8 @@ func ClientConfigPath(cfg config.Config, machine string) string {
 	return filepath.Join(MachineDir(cfg, machine), "client.json")
 }
 
-// TmpDir 是给 CLAUDE_CODE_TMPDIR 用的目录：scratchpad 在这里，Mac 上的命令也能看到。
+// TmpDir 是给 CLAUDE_CODE_TMPDIR 用的目录：Claude Code 在开发机里把 scratchpad 建在这里，
+// Mac 上的命令按同一路径读到同样的文件。
 func TmpDir(cfg config.Config, machine string) string {
 	return filepath.Join(MachineDir(cfg, machine), "tmp")
 }
@@ -141,12 +130,22 @@ func PrepareMachine(cfg config.Config, machine, gatewayIP string) (ClientConfig,
 	return client, nil
 }
 
-// Tokens 读取所有启用的开发机的 token（token → 机器名）。每个请求都会调用：
-// 重新读 .env 的机器列表，停用或重新生成 token 即时生效。
+// PreparedMachines 是已经准备好 client.json 的开发机，按名字排序。
+func PreparedMachines(cfg config.Config) []string {
+	paths, _ := filepath.Glob(filepath.Join(cfg.Runtime, "remote-shell", "*", "client.json"))
+	var names []string
+	for _, path := range paths {
+		names = append(names, filepath.Base(filepath.Dir(path)))
+	}
+	slices.Sort(names)
+	return names
+}
+
+// Tokens 读取所有已准备的开发机的 token（token → 机器名）。每个请求都会调用：
+// 删除机器目录或重新生成 token 即时生效。
 func Tokens(cfg config.Config) (map[string]string, error) {
-	cfg.Env = config.ReadEnvFile(filepath.Join(cfg.Root, ".env"))
 	result := map[string]string{}
-	for _, machine := range Machines(cfg) {
+	for _, machine := range PreparedMachines(cfg) {
 		client, err := readClientConfig(ClientConfigPath(cfg, machine))
 		if err != nil || client.Token == "" {
 			continue
@@ -154,27 +153,6 @@ func Tokens(cfg config.Config) (map[string]string, error) {
 		result[client.Token] = machine
 	}
 	return result, nil
-}
-
-// MachineOverlay 是一台启用 remote-shell 的开发机在 Compose 叠加配置里的挂载：
-// 工作区直接挂 Mac 的目录（不再挂 Linux 副本），remote-shell 目录和二进制目录。
-func MachineOverlay(cfg config.Config, machine string) []any {
-	real := func(path string) string { return util.Resolve(path) }
-	bind := func(source, target string, readOnly bool) map[string]any {
-		mount := map[string]any{"type": "bind", "source": source, "target": target,
-			"bind": map[string]any{"create_host_path": false}}
-		if readOnly {
-			mount["read_only"] = true
-		}
-		return mount
-	}
-	dir := MachineDir(cfg, machine)
-	return []any{
-		bind(real(cfg.Workspace), filepath.Clean(cfg.Workspace), false),
-		bind(real(dir), filepath.Clean(dir), false),
-		bind(real(dir), ClientDir, true),
-		bind(real(BinSource(cfg)), BinDir, true),
-	}
 }
 
 // ---- 服务 ----------------------------------------------------------------------

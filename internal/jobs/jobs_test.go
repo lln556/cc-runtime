@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/zeke-chin/cc-runtime/internal/config"
-	"github.com/zeke-chin/cc-runtime/internal/mutagen"
 	"github.com/zeke-chin/cc-runtime/internal/testutil"
 )
 
@@ -55,32 +54,26 @@ func TestACrashingJobIsRecordedAsFailed(t *testing.T) {
 	}
 }
 
-func TestDedupeJobWaitsForAHealthySession(t *testing.T) {
-	saved := sessionState
-	defer func() { sessionState = saved }()
-	sessionState = func() (mutagen.SessionState, error) {
-		return mutagen.SessionState{Exists: true, Status: "[Paused]", Connected: true}, nil
-	}
-	code, summary, err := runDedupe(testutil.MakeConfig(t, t.TempDir(), ""))
-	if err != nil || code != 2 || !strings.Contains(summary.(map[string]any)["skipped"].(string), "状态不正常") {
-		t.Fatal(code, summary, err)
-	}
-}
-
 func TestLaunchdDefinition(t *testing.T) {
 	cfg := testutil.MakeConfig(t, t.TempDir(), "")
 	saved := executable
 	defer func() { executable = saved }()
 	executable = func() (string, error) { return "/Users/x/.local/bin/cc-runtime", nil }
-	daily, err := Plist(cfg, "dedupe")
+	saved2 := Jobs
+	t.Cleanup(func() { Jobs = saved2 })
+	Jobs = []Job{
+		{Name: "daily", Description: "每天", Calendar: &Calendar{Hour: 4, Minute: 0}},
+		{Name: "frequent", Description: "频繁", Interval: 300},
+	}
+	daily, err := Plist(cfg, "daily")
 	if err != nil {
 		t.Fatal(err)
 	}
-	frequent, _ := Plist(cfg, "externalize")
+	frequent, _ := Plist(cfg, "frequent")
 	for _, fragment := range []string{
-		"<key>Label</key>\n\t<string>io.cc-runtime.dedupe</string>",
+		"<key>Label</key>\n\t<string>io.cc-runtime.daily</string>",
 		"<key>StartCalendarInterval</key>\n\t<dict>\n\t\t<key>Hour</key>\n\t\t<integer>4</integer>\n\t\t<key>Minute</key>\n\t\t<integer>0</integer>",
-		"<array>\n\t\t<string>/Users/x/.local/bin/cc-runtime</string>\n\t\t<string>job</string>\n\t\t<string>run</string>\n\t\t<string>dedupe</string>\n\t</array>",
+		"<array>\n\t\t<string>/Users/x/.local/bin/cc-runtime</string>\n\t\t<string>job</string>\n\t\t<string>run</string>\n\t\t<string>daily</string>\n\t</array>",
 		"<key>CC_RUNTIME_ROOT</key>\n\t\t<string>" + cfg.Root + "</string>",
 		"/usr/local/bin",
 		"<key>LowPriorityIO</key>\n\t<true/>",
@@ -95,10 +88,10 @@ func TestLaunchdDefinition(t *testing.T) {
 	if strings.Contains(daily, "uv") {
 		t.Error("launchd 不应再经过 uv")
 	}
-	dedupe, _ := Get("dedupe")
-	externalize, _ := Get("externalize")
-	if dedupe.ScheduleText() != "每天 04:00" || externalize.ScheduleText() != "每 5 分钟" {
-		t.Fatal(dedupe.ScheduleText(), externalize.ScheduleText())
+	first, _ := Get("daily")
+	second, _ := Get("frequent")
+	if first.ScheduleText() != "每天 04:00" || second.ScheduleText() != "每 5 分钟" {
+		t.Fatal(first.ScheduleText(), second.ScheduleText())
 	}
 }
 

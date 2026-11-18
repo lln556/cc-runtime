@@ -9,12 +9,9 @@ import (
 	"github.com/zeke-chin/cc-runtime/internal/testutil"
 )
 
-func TestMachinesAndPort(t *testing.T) {
+func TestPort(t *testing.T) {
 	cfg := testutil.MakeConfig(t, t.TempDir(), "")
-	cfg.Env = map[string]string{"REMOTE_SHELL_MACHINES": " dev-a, dev-b,,dev-a "}
-	if got := strings.Join(Machines(cfg), ","); got != "dev-a,dev-b" {
-		t.Fatalf("得到 %q", got)
-	}
+	cfg.Env = map[string]string{}
 	if port, err := Port(cfg); err != nil || port != DefaultPort {
 		t.Fatalf("%d %v", port, err)
 	}
@@ -48,14 +45,16 @@ func TestPrepareMachineKeepsToken(t *testing.T) {
 	if err != nil || second.Token != first.Token || second.Addr != "172.30.0.2:10024" {
 		t.Fatalf("%+v %v", second, err)
 	}
-	// token 按启用的机器读取。
-	os.WriteFile(filepath.Join(cfg.Root, ".env"), []byte("REMOTE_SHELL_MACHINES=dev-a\n"), 0o644)
+	// token 按已准备的机器读取；删掉机器目录就不再接受。
+	if got := strings.Join(PreparedMachines(cfg), ","); got != "dev-a" {
+		t.Fatalf("得到 %q", got)
+	}
 	tokens, _ := Tokens(cfg)
 	if tokens[first.Token] != "dev-a" || len(tokens) != 1 {
 		t.Fatalf("%v", tokens)
 	}
-	os.WriteFile(filepath.Join(cfg.Root, ".env"), []byte("REMOTE_SHELL_MACHINES=\n"), 0o644)
+	os.RemoveAll(MachineDir(cfg, "dev-a"))
 	if tokens, _ := Tokens(cfg); len(tokens) != 0 {
-		t.Fatalf("停用后不应再接受：%v", tokens)
+		t.Fatalf("删除后不应再接受：%v", tokens)
 	}
 }

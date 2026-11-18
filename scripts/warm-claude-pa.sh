@@ -1,6 +1,7 @@
 #!/bin/sh
 # 预热 dev-pennsylvania 容器里的 claude：发一条"只回复当前纽约时间"的请求，
 # 输出追加到 cc-runtime 日志目录的 warm-claude-pa.log，退出码写入同名 .status 文件。
+# 在工作区里启动：Bash 命令在 Mac 上执行，家目录在 Mac 上不存在，命令会被拒绝。
 set -u
 
 container=cc-runtime-dev-pennsylvania-1
@@ -28,7 +29,7 @@ tmp_err=$(mktemp /tmp/warm-claude-pa.XXXXXX)
     -e BASH_FUNC_claude%%= \
     -u dev \
     "$container" \
-    sh -c 'cd ~ && timeout 120 claude -p "$0" --output-format text' "$prompt" \
+    sh -c 'cd "${WORKSPACE_DIR:-$HOME}" && timeout 120 claude -p "$0" --output-format text' "$prompt" \
     >"$tmp_out" 2>"$tmp_err"
 exit_code=$?
 

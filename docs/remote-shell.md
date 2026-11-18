@@ -77,8 +77,8 @@ cwd 由子进程的工作目录传递，环境变量由进程环境传递。客�
 
 | 文件 | 来源 | 内容 |
 | --- | --- | --- |
-| `managed-settings.json` | 仓库 `claude-code/`，只读挂载 | `env.CLAUDE_CODE_SHELL`、SessionStart hook |
-| `CLAUDE.md` | 仓库 `claude-code/`，只读挂载 | 执行环境的规则：Bash 在 Mac 上执行、哪些路径共享、在错误的目录启动时怎么办 |
+| `managed-settings.json` | 仓库 `claude-code/`，构建时打进镜像 | `env.CLAUDE_CODE_SHELL`、SessionStart hook |
+| `CLAUDE.md` | 仓库 `claude-code/`，构建时打进镜像 | 执行环境的规则：Bash 在 Mac 上执行、哪些路径共享、在错误的目录启动时怎么办 |
 | `managed-settings.d/remote-shell.json` | 入口脚本按 compose 传入的 `CC_REMOTE_SHELL_TMPDIR` 写入 | `env.CLAUDE_CODE_TMPDIR`：它是 Mac 上的路径，因机器而异 |
 
 在 Claude Code 2.1.327 上实测：
@@ -90,7 +90,7 @@ cwd 由子进程的工作目录传递，环境变量由进程环境传递。客�
 
 使用者的 `~/.claude/settings.json` 只放模型、主题这类个人设置。
 
-两个文件现在是单独挂载的，以后随镜像瘦身改为打进镜像。单文件挂载指向的是挂载时的那个文件：编辑器或同步工具用改名的方式替换文件后，要重建开发机才能看到新内容。
+改了 `claude-code/` 要重新构建镜像、重建开发机才生效；`cc-runtime check remote-shell` 发现开发机里的文件和仓库不一致时会提醒。
 
 ### SessionStart hook
 

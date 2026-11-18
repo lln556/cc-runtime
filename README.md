@@ -41,7 +41,7 @@
 
 2. **安装 CLI。** `scripts/install.sh` 编译 `cc-runtime` 并装到 `~/.local/bin`（确保它在 `PATH` 里）。二进制记录了本仓库的位置，在任何目录下都能运行；更新代码后重新运行这个脚本即可。
 
-3. **环境变量。** `cp .env.example .env`，填写 `PASSWORD`（开发机的 SSH/VNC 密码）和三个路径：`WORKSPACE_DIR`（Mac 的工作区）、`RUNTIME_DIR`（remote-shell 的机器目录、开发机用的客户端、日志和状态，放在工作区之外）、`DOWNLOADS_DIR`（Mac 的下载目录）。工作区和下载目录在开发机里挂在和 Mac 相同的路径上。可选的 `HOST_SCREENSHOTS_PATH` 把截图目录也以相同路径只读挂进开发机。
+3. **环境变量。** `cp .env.example .env`，填写 `PASSWORD`（开发机的 SSH 密码）和三个路径：`WORKSPACE_DIR`（Mac 的工作区）、`RUNTIME_DIR`（remote-shell 的机器目录、开发机用的客户端、日志和状态，放在工作区之外）、`DOWNLOADS_DIR`（Mac 的下载目录）。工作区和下载目录在开发机里挂在和 Mac 相同的路径上。可选的 `HOST_SCREENSHOTS_PATH` 把截图目录也以相同路径只读挂进开发机。
 
 4. **remote-shell 服务。**
 
@@ -64,10 +64,10 @@
 
 ## 访问
 
-| 开发机 | SSH | VNC | noVNC |
-|---|---|---|---|
-| `dev-pennsylvania` | `ssh -p 2222 dev@127.0.0.1` | `127.0.0.1:5901` | `http://127.0.0.1:6080/vnc.html` |
-| `dev-california` | `ssh -p 2223 dev@127.0.0.1` | `127.0.0.1:5902` | `http://127.0.0.1:6081/vnc.html` |
+| 开发机 | SSH |
+|---|---|
+| `dev-pennsylvania` | `ssh -p 2222 dev@127.0.0.1` |
+| `dev-california` | `ssh -p 2223 dev@127.0.0.1` |
 
 - 经 Tailscale：`ssh dev@cc-dev`（设备名由 `TS_HOSTNAME` 设置），只开放 SSH，其他端口用 SSH 端口转发。
 - 从开发机到 tailnet：两台开发机都能按 IP（`100.x.y.z`）访问 tailnet 设备的 TCP 端口，经 `tailscale` 容器出去，不支持 MagicDNS 名字。
@@ -93,13 +93,13 @@ Claude Code 要在工作区或下载目录里启动：开发机的 `/home/dev`�
 
 ```text
 compose.yaml          服务、网络、挂载
-Dockerfile            开发镜像（构建上下文只有 scripts/entrypoint.sh 和 shell/）
+Dockerfile            开发镜像：Claude Code、SSH、zsh，不含语言工具链（构建上下文只有 claude-code/、scripts/entrypoint.sh 和 shell/）
 shell/                镜像内的 shell 配置
-claude-code/          开发机里 Claude Code 的系统级设置和 CLAUDE.md（挂到 /etc/claude-code）
+claude-code/          开发机里 Claude Code 的系统级设置和 CLAUDE.md（打进镜像的 /etc/claude-code）
 cmd/cc-runtime/       CLI 入口
 internal/             CLI 的各个部分（部署、remote-shell、定时任务、状态面板等）和测试
 scripts/install.sh    编译并安装 CLI
-scripts/entrypoint.sh 开发机启动脚本：SSH、VNC、桌面
+scripts/entrypoint.sh 开发机启动脚本：SSH、身份、Claude Code 的临时目录
 scripts/              网关和 network-init 容器内使用的脚本
 proxy/                网关配置模板、DNS 配置；实际配置（config-pennsylvania.yaml、config-california.yaml）不入库
 tailscale/config/     Tailscale Serve 配置；登录状态在 tailscale/state/，不入库

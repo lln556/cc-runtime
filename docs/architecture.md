@@ -21,12 +21,12 @@ flowchart LR
     RS -->|zsh| WS
     P1 --> E1[出口 A]
     P2 --> E2[出口 B]
-    H[Mac: SSH / VNC / noVNC] --> P1 & P2
+    H[Mac: SSH] --> P1 & P2
 ```
 
 | 服务 | 网络 | 职责 |
 |---|---|---|
-| `dev-pennsylvania`、`dev-california` | 仅私网（`.10`、`.11`） | 开发机：Claude Code、SSH、远程桌面 |
+| `dev-pennsylvania`、`dev-california` | 仅私网（`.10`、`.11`） | 开发机：Claude Code、SSH |
 | `proxy-pennsylvania`、`proxy-california` | 私网（`.2`、`.4`）+ 出口网络 | 各自开发机的透明网关：TCP 代理、DNS、入站转发 |
 | `tailscale` | 私网（`.3`）+ 出口网络 | 从 tailnet 转发 SSH 到 `dev-pennsylvania:22`；为网关提供访问 tailnet 的 SOCKS5 出口 |
 | `*-network-init` | 临时共享对应开发机的网络命名空间 | 设置默认路由和 DNS 防绕过规则，然后退出 |
@@ -52,10 +52,10 @@ remote-shell 另有三个挂载（`RUNTIME_DIR/remote-shell/<机器>` 和 `RUNTI
 
 网关用 Mihomo 的固定 `DIRECT` tunnel 把宿主机端口转发到自己开发机的私网地址，这些连接不经过代理链：
 
-| 开发机 | SSH | VNC | noVNC |
-|---|---|---|---|
-| `dev-pennsylvania` | `127.0.0.1:2222` | `127.0.0.1:5901` | `http://127.0.0.1:6080/vnc.html` |
-| `dev-california` | `127.0.0.1:2223` | `127.0.0.1:5902` | `http://127.0.0.1:6081/vnc.html` |
+| 开发机 | SSH |
+|---|---|
+| `dev-pennsylvania` | `127.0.0.1:2222` |
+| `dev-california` | `127.0.0.1:2223` |
 
 端口只绑定宿主机的 `127.0.0.1`。网关还在私网上开两个端口，转发到宿主机，开发机可以借此在 Mac 上执行命令；它们不发布到宿主机，也不经过代理链：
 

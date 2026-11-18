@@ -39,7 +39,7 @@ cc-runtime check proxy
 | `egress proxy` | `residential`（HTTP），`dialer-proxy: residential-upstream` | `california`（VLESS Reality + Vision），`server` 写 IP，`dialer-proxy: california-upstream` |
 | `egress groups` | `egress → residential`；`residential-upstream`：`default`（经 airport）/ `weimob`（直连） | `egress → california`；`california-upstream`：`airport`（默认）/ `DIRECT` |
 | `listeners` | 无 | `mac-mixed`：容器内 `0.0.0.0:7890`，宿主机发布为 `127.0.0.1:17890` |
-| `tunnels` | 到 Mac 的 SSH `172.30.0.2:10023`；`dev-pennsylvania`（`172.30.0.10`）的 SSH/VNC/noVNC 入站 | 到 Mac 的 SSH `172.30.0.4:10023`；`dev-california`（`172.30.0.11`）的 SSH/VNC/noVNC 入站 |
+| `tunnels` | 到 Mac 的 SSH `172.30.0.2:10023`；`dev-pennsylvania`（`172.30.0.10`）的 SSH 入站 | 到 Mac 的 SSH `172.30.0.4:10023`；`dev-california`（`172.30.0.11`）的 SSH 入站 |
 
 ## 流量与 DNS
 

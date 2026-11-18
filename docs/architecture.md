@@ -1,14 +1,14 @@
 # 架构
 
-cc-runtime 在一台 Mac（OrbStack 或其他 Docker 环境）上运行若干台 Linux 开发机。每台开发机有自己的身份和出口网关，所有开发机共用同一份工作区。本文说明系统的组成和各部分的设计取舍；工作区的同步、依赖隔离和 git 数据见 [工作区](workspace.md)。
+cc-runtime 在一台 Mac（OrbStack 或其他 Docker 环境）上运行若干台 Linux 开发机。开发机只负责两件事：独立的身份（家目录、SSH 主机密钥、machine-id、Claude 登录），以及经各自网关的出口。开发机里运行 Claude Code，它的 Bash 命令经 remote-shell 在 Mac 上执行；文件读写直接作用于挂载进来的 Mac 工作区。所以工作区只有一份，依赖只有 Mac 一套。本文说明系统的组成和各部分的设计取舍；命令怎么在 Mac 上执行见 [remote-shell](remote-shell.md)。
 
 ## 组成
 
 ```mermaid
 flowchart LR
     subgraph mac[Mac]
-        WS[workspace] <-->|Mutagen| LW[linux-workspace]
-        GIT[(git store)]
+        WS[(workspace / Downloads)]
+        RS[remote-shell 服务<br/>127.0.0.1:47100]
     end
     subgraph private[私网 172.30.0.0/24]
         PA[dev-pennsylvania] -->|默认路由| P1[proxy-pennsylvania]
@@ -16,8 +16,9 @@ flowchart LR
         TS[tailscale] -->|SSH| PA
         P1 & P2 -->|tailnet 地址| TS
     end
-    LW -. bind mount .-> PA & CA
-    GIT -. bind mount .-> PA & CA
+    WS -. bind mount 同路径 .-> PA & CA
+    P1 & P2 -->|:10024 tunnel| RS
+    RS -->|zsh| WS
     P1 --> E1[出口 A]
     P2 --> E2[出口 B]
     H[Mac: SSH / VNC / noVNC] --> P1 & P2
@@ -25,12 +26,14 @@ flowchart LR
 
 | 服务 | 网络 | 职责 |
 |---|---|---|
-| `dev-pennsylvania`、`dev-california` | 仅私网（`.10`、`.11`） | 开发机：开发工具、SSH、远程桌面 |
+| `dev-pennsylvania`、`dev-california` | 仅私网（`.10`、`.11`） | 开发机：Claude Code、SSH、远程桌面 |
 | `proxy-pennsylvania`、`proxy-california` | 私网（`.2`、`.4`）+ 出口网络 | 各自开发机的透明网关：TCP 代理、DNS、入站转发 |
 | `tailscale` | 私网（`.3`）+ 出口网络 | 从 tailnet 转发 SSH 到 `dev-pennsylvania:22`；为网关提供访问 tailnet 的 SOCKS5 出口 |
 | `*-network-init` | 临时共享对应开发机的网络命名空间 | 设置默认路由和 DNS 防绕过规则，然后退出 |
 
-开发机挂载的 Mac 目录都放在和 Mac 相同的路径上：工作区副本挂到 `WORKSPACE_DIR`，git 数据挂到 `RUNTIME_DIR/git`，下载目录挂到 `DOWNLOADS_DIR`，配置了 `HOST_SCREENSHOTS_PATH` 时截图目录也只读挂到同一路径（目录不存在就不挂，由 `cc-runtime` 在调用 Compose 时生成叠加配置）；家目录里的 `~/workspace`、`~/Downloads` 是指向它们的链接。这样 git 记下的路径、使用者给出的 Mac 路径在开发机上都能直接用，原因见 [工作区](workspace.md#为什么是两棵树)。
+开发机挂载的 Mac 目录都放在和 Mac 相同的路径上：工作区挂到 `WORKSPACE_DIR`，下载目录挂到 `DOWNLOADS_DIR`，配置了 `HOST_SCREENSHOTS_PATH` 时截图目录也只读挂到同一路径（目录不存在就不挂，由 `cc-runtime` 在调用 Compose 时生成叠加配置）；家目录里的 `~/workspace`、`~/Downloads` 是指向它们的链接。路径两侧相同，容器里的 Read/Edit 和 Mac 上的 Bash 看到的是同一个文件，git 记下的绝对路径（worktree、子模块）、使用者给出的 Mac 路径也都直接可用。worktree 要建在工作区之内，建在 `/tmp` 等地方的只有 Mac 一侧能看到。
+
+remote-shell 另有三个挂载（`RUNTIME_DIR/remote-shell/<机器>` 和 `RUNTIME_DIR/bin`），见 [remote-shell](remote-shell.md#部署)。
 
 开发机按 `dev-{代号}` 命名，代号一般取它的出口地点。增加一台开发机，就是增加一个开发机服务、一个网关和一个 `network-init`，并在 `dev-runtimes/` 下放它的状态目录。
 
@@ -57,7 +60,7 @@ flowchart LR
 端口只绑定宿主机的 `127.0.0.1`。网关还在私网上开两个端口，转发到宿主机，开发机可以借此在 Mac 上执行命令；它们不发布到宿主机，也不经过代理链：
 
 - `<网关 IP>:10023` → `host.docker.internal:22`：Mac 的 SSH。
-- `<网关 IP>:10024` → `host.docker.internal:47100`：Mac 上的 remote-shell 服务（LaunchAgent），启用的开发机里 Claude Code 的 Bash 命令经它在 Mac 上执行，见 [remote-shell](remote-shell.md)。
+- `<网关 IP>:10024` → `host.docker.internal:47100`：Mac 上的 remote-shell 服务（LaunchAgent），开发机里 Claude Code 的 Bash 命令经它在 Mac 上执行，见 [remote-shell](remote-shell.md)。
 
 ### Tailscale
 

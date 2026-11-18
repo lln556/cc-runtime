@@ -2,14 +2,14 @@
 
 remote-shell 让开发机里的 Claude Code 把 Bash 命令交给 Mac 执行：Claude Code 进程、它的身份和 API 出口仍在开发机里，命令在使用者的 Mac 登录会话里运行，看到的是 Mac 的 PATH、Homebrew、Xcode、钥匙串和已装的依赖。项目只需要一套 Mac 依赖，不必再维护 Linux 版本。
 
-在 `.env` 的 `REMOTE_SHELL_MACHINES` 里列出的开发机启用；其余开发机保持原样。
+所有开发机都这样工作，没有第二种模式。
 
 ## 组成
 
 ```
 开发机（Linux，私网）                  网关（Mihomo）                 Mac（GUI 登录会话）
 claude                                 DIRECT tunnel                  LaunchAgent io.cc-runtime.remote-shell
- └─ /opt/cc-runtime/remote-shell/zsh   <网关 IP>:10024                cc-runtime remote-shell serve
+ └─ /opt/cc-runtime/bin/remote-shell/zsh <网关 IP>:10024               cc-runtime remote-shell serve
     -c <命令>          ── TCP，帧协议 ──►  → host.docker.internal:47100 ──► 127.0.0.1:47100
                        ◄─ stdout/stderr/退出码 ─                        └─ 新进程组：/bin/zsh -c <命令>
           │                                                                     │
@@ -18,10 +18,10 @@ claude                                 DIRECT tunnel                  LaunchAgen
 
 | 部分 | 位置 | 作用 |
 |---|---|---|
-| 客户端 | 开发机 `/opt/cc-runtime/remote-shell/zsh`（`RUNTIME_DIR/bin` 只读挂载） | `CLAUDE_CODE_SHELL`；每条命令建立一条连接，转发输出、信号和心跳，写回 cwd |
+| 客户端 | 开发机 `/opt/cc-runtime/bin/remote-shell/zsh`（`RUNTIME_DIR/bin` 只读挂载） | `CLAUDE_CODE_SHELL`；每条命令建立一条连接，转发输出、信号和心跳，写回 cwd |
 | 服务 | Mac，LaunchAgent，监听 `127.0.0.1:47100` | 认证、执行、清理进程组；缓存 Mac 登录 shell 的环境 |
 | tunnel | 开发机自己的网关，私网地址的 10024 端口 | 只开在私网，不发布到宿主机；不经过代理链 |
-| 每机目录 | `RUNTIME_DIR/remote-shell/<机器>/` | `client.json`（地址和 token）、`tmp/`（Claude Code 的临时目录） |
+| 每机目录 | `RUNTIME_DIR/remote-shell/<机器>/` | `client.json`（地址和 token，只读挂到 `/var/lib/cc-runtime/remote-shell`）、`tmp/`（Claude Code 的临时目录，可写地挂在相同路径） |
 
 客户端和服务是同一个 `cc-runtime` 程序：经 `…/remote-shell/zsh` 链接运行时是客户端。`scripts/install.sh` 在 Mac 上安装 darwin 版，同时把 linux 版交叉编译到 `RUNTIME_DIR/bin/cc-runtime-linux`，并建立 `remote-shell/zsh` 链接。开发机挂的是这个目录而不是单个文件：重新安装是改名替换，挂单个文件会一直指向旧文件。
 
@@ -47,7 +47,7 @@ Mac 的登录 shell 是 zsh，系统自带的 bash 是 3.2。客户端以 zsh �
 
 ### 工作区直接挂载
 
-启用的开发机直接挂 Mac 的 `WORKSPACE_DIR`（同一路径），不再挂 Linux 副本：Edit/Write 在容器里写入，紧接着的 Bash 在 Mac 上就能读到；依赖只有 Mac 一套；git 只在 Mac 一侧写。挂载由 `cc-runtime up` 生成的 Compose 叠加配置完成（Compose 按挂载目标合并，替换 compose.yaml 里的 Linux 副本）。
+开发机直接挂 Mac 的 `WORKSPACE_DIR`（同一路径）：Edit/Write 在容器里写入，紧接着的 Bash 在 Mac 上就能读到；依赖只有 Mac 一套。没有副本，也就没有同步延迟、冲突和第二套依赖。
 
 ### 连不上时报错，不回退
 
@@ -76,7 +76,7 @@ cwd 由子进程的工作目录传递，环境变量由进程环境传递。客�
 ```json
 {
   "env": {
-    "CLAUDE_CODE_SHELL": "/opt/cc-runtime/remote-shell/zsh",
+    "CLAUDE_CODE_SHELL": "/opt/cc-runtime/bin/remote-shell/zsh",
     "CLAUDE_CODE_TMPDIR": "<RUNTIME_DIR>/remote-shell/<机器>/tmp"
   }
 }
@@ -117,7 +117,7 @@ launchd 启动的进程只有系统目录的 PATH，而每条命令都启动登�
 
 ## 部署
 
-1. `.env` 里设置 `REMOTE_SHELL_MACHINES`（逗号分隔），端口默认 47100（`REMOTE_SHELL_PORT`，改了要同时改网关配置里的 tunnel）。
+1. 端口默认 47100（`.env` 的 `REMOTE_SHELL_PORT`，改了要同时改网关配置里的 tunnel）。
 2. 网关配置的 `GATEWAY-SPECIFIC: tunnels` 块里有：
    ```yaml
    - network: [tcp]
@@ -127,7 +127,14 @@ launchd 启动的进程只有系统目录的 PATH，而每条命令都启动登�
    ```
    网关的入口脚本把私网上的 10023、10024 端口排除在透明代理之外，并只对自己的开发机放行。
 3. 在 Mac 上：`scripts/install.sh`，然后 `cc-runtime remote-shell install`（写入 LaunchAgent 并启动）。
-4. `cc-runtime up <网关> <开发机> --force-recreate`：生成每机目录和 token，挂载 Mac 工作区、每机目录（同路径，以及只读挂到 `/var/lib/cc-runtime/remote-shell`）和 `/opt/cc-runtime`。
+4. `cc-runtime up <网关> <开发机> --force-recreate`：准备阶段生成每机目录和 token。`compose.yaml` 给每台开发机挂载：
+
+   | 源（Mac） | 开发机里 | 方式 | 用途 |
+   | --- | --- | --- | --- |
+   | `RUNTIME_DIR/remote-shell/<机器>` | `/var/lib/cc-runtime/remote-shell` | 只读 | `client.json`：客户端被当作 shell 调用时不知道自己是哪台机器，从固定位置读；只读，容器改不了 token |
+   | `RUNTIME_DIR/remote-shell/<机器>/tmp` | 同路径 | 读写 | `CLAUDE_CODE_TMPDIR`。主要为 scratchpad：Write 在容器里写的脚本，Bash 在 Mac 上按同一路径执行 |
+   | `RUNTIME_DIR/bin` | `/opt/cc-runtime/bin` | 只读 | linux 版客户端；放在 `bin` 子目录，不遮住镜像里 `/opt/cc-runtime` 的 shell 配置 |
+
 5. 配置开发机的 `~/.claude/settings.json` 和 `CLAUDE.md`（见上），运行 `cc-runtime check remote-shell`。它检查服务和版本、tunnel、挂载、Claude Code 配置，并在开发机里端到端执行 `uname -s; launchctl managername`，应得到 `Darwin Aqua`。
 
 LaunchAgent 的 `ProcessType` 是 `Interactive`：默认的后台类型会被降低 CPU/IO 优先级。服务日志在 `RUNTIME_DIR/logs/remote-shell.log`（连接、拒绝、每条命令的退出码和用时，命令截断到 160 字符；不记录输出）；进行中的命令写在 `RUNTIME_DIR/state/remote-shell.json`。
@@ -136,7 +143,7 @@ LaunchAgent 的 `ProcessType` 是 `Interactive`：默认的后台类型会被降
 
 ## 边界
 
-- **认证**：服务监听 Mac 的回环地址，但 OrbStack 下任何容器都能经 `host.docker.internal` 连到它，所以每个请求都要带 token。每台开发机一个 32 字节随机 token，在 `client.json`（0600）里；服务每个请求都重新读取 `.env` 的机器列表和 token，停用即时生效。开发机里能读 token 的进程本来就能通过 remote-shell 执行命令，不扩大权限。流量不出这台 Mac，不加密。
+- **认证**：服务监听 Mac 的回环地址，但 OrbStack 下任何容器都能经 `host.docker.internal` 连到它，所以每个请求都要带 token。每台开发机一个 32 字节随机 token，在 `client.json`（0600）里；服务每个请求都重新读取各机器目录里的 token，删除机器目录或重新生成 token 即时生效。开发机里能读 token 的进程本来就能通过 remote-shell 执行命令，不扩大权限。流量不出这台 Mac，不加密。
 - **执行隔离**：命令以使用者的 Mac 账户在登录会话里运行，能访问该账户能访问的一切，包括钥匙串。开发机不再是命令的沙箱。
 - **出口**：命令的网络流量走 Mac 自己的网络，不经过开发机的网关；「没有直连回退」只对 Claude Code 自己的流量成立。
 - **共享工作区**：直接挂载后，开发机能看到工作区里的一切，包括本仓库的 `dev-runtimes/`（其他开发机的家目录）、`.env` 和网关配置。

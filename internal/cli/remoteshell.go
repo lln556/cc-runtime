@@ -167,11 +167,18 @@ func checkClaudeConfig(cfg config.Config, r *checkReport, machine, home string) 
 		}
 		return result.Stdout, true
 	}
+	// 这两个文件打在镜像里；仓库改了而镜像没重新构建时提醒。
+	stale := func(name, text string) {
+		if want, err := os.ReadFile(filepath.Join(cfg.Root, "claude-code", name)); err == nil && string(want) != text {
+			r.warn("%s：/etc/claude-code/%s 和仓库的 claude-code/%s 不一致，重新构建镜像并重建开发机后生效", machine, name, name)
+		}
+	}
 	var managed struct {
 		Env   map[string]string `json:"env"`
 		Hooks map[string]any    `json:"hooks"`
 	}
 	if text, ok := read("/etc/claude-code/managed-settings.json"); ok {
+		stale("managed-settings.json", text)
 		err := json.Unmarshal([]byte(text), &managed)
 		hooks, _ := json.Marshal(managed.Hooks)
 		if err != nil {
@@ -194,8 +201,11 @@ func checkClaudeConfig(cfg config.Config, r *checkReport, machine, home string) 
 			r.ok("%s：CLAUDE_CODE_TMPDIR=%s", machine, dropin.Env["CLAUDE_CODE_TMPDIR"])
 		}
 	}
-	if text, ok := read("/etc/claude-code/CLAUDE.md"); ok && !strings.Contains(text, "remote-shell") {
-		r.fail("%s：/etc/claude-code/CLAUDE.md 没有说明 Bash 在 Mac 上执行", machine)
+	if text, ok := read("/etc/claude-code/CLAUDE.md"); ok {
+		stale("CLAUDE.md", text)
+		if !strings.Contains(text, "remote-shell") {
+			r.fail("%s：/etc/claude-code/CLAUDE.md 没有说明 Bash 在 Mac 上执行", machine)
+		}
 	}
 	input, _ := json.Marshal(map[string]string{"cwd": cfg.Workspace, "source": "startup", "hook_event_name": "SessionStart"})
 	result, err := deploy.Exec(cfg, machine, "sh", "-c", `printf '%s' "$1" | "$2"`, "sh", string(input), remoteshell.SessionStartPath)

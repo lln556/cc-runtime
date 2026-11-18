@@ -122,17 +122,43 @@ func TestRunRejects(t *testing.T) {
 		t.Fatalf("%d %q", code, stderr)
 	}
 	req = request(t, "true")
-	req.Cwd = "/nonexistent/dir"
-	if code, _, stderr := runCommand(t, addr, req, ""); code != 1 || !strings.Contains(stderr, "在 Mac 上不存在") {
-		t.Fatalf("%d %q", code, stderr)
-	}
-	req = request(t, "true")
 	req.Version = 99
 	if code, _, stderr := runCommand(t, addr, req, ""); code != 2 || !strings.Contains(stderr, "协议版本") {
 		t.Fatalf("%d %q", code, stderr)
 	}
 	if code, _, stderr := runCommand(t, "127.0.0.1:1", request(t, "true"), ""); code != 255 || !strings.Contains(stderr, "无法连接") {
 		t.Fatalf("%d %q", code, stderr)
+	}
+}
+
+func TestMissingCwdFallsBack(t *testing.T) {
+	server, addr := startServer(t)
+	fallback := t.TempDir()
+	server.FallbackDir = fallback
+	real, _ := filepath.EvalSymlinks(fallback)
+	sub := filepath.Join(fallback, "sub")
+	os.Mkdir(sub, 0o755)
+	realSub, _ := filepath.EvalSymlinks(sub)
+	cwdFile := filepath.Join(t.TempDir(), "claude-x-cwd")
+	// 不 cd：在后备目录执行并提示，cwd 写回为后备目录。
+	req := request(t, "")
+	req.Cwd = "/home/dev-does-not-exist"
+	command, _, _ := RewriteCwd(`eval 'pwd' && pwd -P >| /tmp/claude-x-cwd`)
+	req.Command, req.CaptureCwd = []byte(command), true
+	code, stdout, stderr := runCommand(t, addr, req, cwdFile)
+	data, _ := os.ReadFile(cwdFile)
+	if code != 0 || strings.TrimSpace(stdout) != real || !strings.Contains(stderr, "在 Mac 上不存在") ||
+		strings.TrimSpace(string(data)) != real {
+		t.Fatalf("%d %q %q %q", code, stdout, stderr, data)
+	}
+	// 命令里的 cd 照常生效。
+	command, _, _ = RewriteCwd(`eval 'cd sub' && pwd -P >| /tmp/claude-x-cwd`)
+	req.Command = []byte(command)
+	if code, _, _ := runCommand(t, addr, req, cwdFile); code != 0 {
+		t.Fatalf("退出码 %d", code)
+	}
+	if data, _ := os.ReadFile(cwdFile); strings.TrimSpace(string(data)) != realSub {
+		t.Fatalf("cwd %q", data)
 	}
 }
 

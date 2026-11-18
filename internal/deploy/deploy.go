@@ -11,14 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/zeke-chin/cc-runtime/internal/config"
 	"github.com/zeke-chin/cc-runtime/internal/remoteshell"
-	"github.com/zeke-chin/cc-runtime/internal/ui"
 	"github.com/zeke-chin/cc-runtime/internal/util"
 )
 
@@ -268,9 +266,6 @@ func Inspect(ids []string) ([]Container, error) {
 	return containers, json.Unmarshal([]byte(result.Stdout), &containers)
 }
 
-// RunningContainers 是本项目运行中的容器。
-func RunningContainers(p Project) ([]Container, error) { return projectContainers(p) }
-
 func projectContainers(p Project) ([]Container, error) {
 	docker, err := require("docker")
 	if err != nil {
@@ -293,20 +288,6 @@ func orphanContainers(p Project, containers []Container) []Container {
 		}
 	}
 	return orphans
-}
-
-// LegacyMachines 是运行中、仍把 Linux 副本挂作工作区的开发机（过渡期的旧部署）。
-// 重建会换成直接挂 Mac 工作区，所以只在使用者点名时才做。
-func LegacyMachines(containers []Container, linuxWorkspace string) map[string]bool {
-	result := map[string]bool{}
-	for _, c := range containers {
-		for _, m := range c.Mounts {
-			if filepath.Clean(m.Source) == filepath.Clean(linuxWorkspace) {
-				result[c.Config.Labels["com.docker.compose.service"]] = true
-			}
-		}
-	}
-	return result
 }
 
 func AddressConflicts(p Project, services []string, orphans []Container) []string {
@@ -672,25 +653,6 @@ func Up(cfg config.Config, services []string, opts UpOptions) error {
 	if err != nil {
 		return err
 	}
-	skipped := LegacyMachines(containers, filepath.Join(cfg.Runtime, "linux-workspace"))
-	noDeps := len(services) > 0
-	for _, s := range services {
-		delete(skipped, s) // 明确点名的照常重建
-	}
-	if len(skipped) > 0 {
-		var names []string
-		for name := range skipped {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		targets = slices.DeleteFunc(targets, func(s string) bool {
-			return skipped[s] || skipped[strings.TrimSuffix(s, "-network-init")]
-		})
-		// 其他服务不能把跳过的机器作为依赖带起来。
-		noDeps = true
-		fmt.Println(ui.Yellow.S("跳过 "+strings.Join(names, ", ")) +
-			"：它还挂着 Linux 副本，迁移前不重建（见 docs/local/redesign/03）。确要重建就在命令里点名它。")
-	}
 	orphans := orphanContainers(project, containers)
 	if len(orphans) > 0 && !opts.AllowOrphans {
 		var names []string
@@ -722,7 +684,7 @@ func Up(cfg config.Config, services []string, opts UpOptions) error {
 		return err
 	}
 	args := []string{"up", "-d"}
-	if noDeps {
+	if len(services) > 0 {
 		args = append(args, "--no-deps")
 	}
 	if opts.ForceRecreate {

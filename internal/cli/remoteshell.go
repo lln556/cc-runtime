@@ -115,16 +115,7 @@ func checkRemoteShell(cfg config.Config) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	containers, err := deploy.RunningContainers(project)
-	if err != nil {
-		return 0, err
-	}
-	legacy := deploy.LegacyMachines(containers, filepath.Join(cfg.Runtime, "linux-workspace"))
 	for _, machine := range deploy.DevServices(project) {
-		if legacy[machine] {
-			r.warn("%s：还挂着 Linux 副本，迁移前不检查（见 docs/local/redesign/03）", machine)
-			continue
-		}
 		checkMachine(cfg, r, project, machine, project.Services[machine], port)
 	}
 	return exitCode(r.failed), nil

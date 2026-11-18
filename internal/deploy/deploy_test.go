@@ -299,24 +299,3 @@ func TestGatewayIP(t *testing.T) {
 		t.Fatalf("默认网关 %s", got)
 	}
 }
-
-func TestLegacyMachinesStillMountTheLinuxCopy(t *testing.T) {
-	container := func(service, source string) Container {
-		var c Container
-		c.Config.Labels = map[string]string{"com.docker.compose.service": service}
-		c.Mounts = append(c.Mounts, struct {
-			Type        string `json:"Type"`
-			Source      string `json:"Source"`
-			Destination string `json:"Destination"`
-			RW          bool   `json:"RW"`
-		}{Type: "bind", Source: source, Destination: "/Users/x/workspace", RW: true})
-		return c
-	}
-	got := LegacyMachines([]Container{
-		container("dev-a", "/Users/x/.cc-runtime/linux-workspace"),
-		container("dev-b", "/Users/x/workspace"),
-	}, "/Users/x/.cc-runtime/linux-workspace/")
-	if !got["dev-a"] || got["dev-b"] || len(got) != 1 {
-		t.Fatal(got)
-	}
-}

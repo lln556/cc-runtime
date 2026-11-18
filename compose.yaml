@@ -41,14 +41,11 @@ services:
       # The Mac workspace at the same path, so paths are identical for Read/Edit
       # in the container and Bash on the Mac. ~/workspace is a link to it.
       - {<<: *bind, source: "${WORKSPACE_DIR:?Set WORKSPACE_DIR in .env}", target: "${WORKSPACE_DIR}"}
-      # Transitional: repositories still externalized point their .git here.
-      # Remove after the migration (docs/local/redesign/03).
-      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/git", target: "${RUNTIME_DIR}/git"}
       - {<<: *bind, source: "${DOWNLOADS_DIR:?Set DOWNLOADS_DIR in .env}", target: "${DOWNLOADS_DIR}"}
       # remote-shell: client.json (read-only, at the client's fixed path), the
       # shared temp dir for CLAUDE_CODE_TMPDIR (same path as on the Mac), and
       # the Linux client built by scripts/install.sh.
-      - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania", target: /var/lib/cc-runtime/remote-shell, read_only: true}
+      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/remote-shell/dev-pennsylvania", target: /var/lib/cc-runtime/remote-shell, read_only: true}
       - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp"}
       - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
       # Claude Code system settings (shell, SessionStart hook) and CLAUDE.md.
@@ -89,14 +86,11 @@ services:
       # The Mac workspace at the same path, so paths are identical for Read/Edit
       # in the container and Bash on the Mac. ~/workspace is a link to it.
       - {<<: *bind, source: "${WORKSPACE_DIR:?Set WORKSPACE_DIR in .env}", target: "${WORKSPACE_DIR}"}
-      # Transitional: repositories still externalized point their .git here.
-      # Remove after the migration (docs/local/redesign/03).
-      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/git", target: "${RUNTIME_DIR}/git"}
       - {<<: *bind, source: "${DOWNLOADS_DIR:?Set DOWNLOADS_DIR in .env}", target: "${DOWNLOADS_DIR}"}
       # remote-shell: client.json (read-only, at the client's fixed path), the
       # shared temp dir for CLAUDE_CODE_TMPDIR (same path as on the Mac), and
       # the Linux client built by scripts/install.sh.
-      - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-california", target: /var/lib/cc-runtime/remote-shell, read_only: true}
+      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/remote-shell/dev-california", target: /var/lib/cc-runtime/remote-shell, read_only: true}
       - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-california/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-california/tmp"}
       - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
       # Claude Code system settings (shell, SessionStart hook) and CLAUDE.md.

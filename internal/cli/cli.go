@@ -36,7 +36,7 @@ const overview = `cc-runtime：开发运行环境的统一入口。
   schedule      安装或移除 launchd 定时任务
   job           立即运行定时任务，或查看其日志
   check         一致性检查（网关配置、remote-shell）
-  version     显示版本
+  version       显示版本
 
 每个命令都可以加 -h 查看说明。`
 
@@ -233,6 +233,10 @@ func cmdSchedule(cfg config.Config, args []string) (int, error) {
 		return 0, err
 	}
 	if action == "list" {
+		if len(jobs.Jobs) == 0 {
+			fmt.Println(ui.Dim.S("没有登记的任务。"))
+			return 0, nil
+		}
 		table := ui.NewTable("", true, ui.Column{Header: "任务"}, ui.Column{Header: "计划"},
 			ui.Column{Header: "launchd"}, ui.Column{Header: "说明"})
 		for _, job := range jobs.Jobs {

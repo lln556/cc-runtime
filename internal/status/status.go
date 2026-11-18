@@ -76,13 +76,15 @@ func jobSummary(record map[string]any) ui.Cell {
 }
 
 func JobsSection(cfg config.Config) *ui.Table {
+	if len(jobs.Jobs) == 0 {
+		table := itemTable("定时任务")
+		table.Add("任务", ui.C("没有登记的任务", Dim))
+		return table
+	}
 	table := ui.NewTable("定时任务", true,
 		ui.Column{Header: "任务", Width: 12, Style: ui.Bold}, ui.Column{Header: "计划", Width: 12},
 		ui.Column{Header: "launchd", Width: 8}, ui.Column{Header: "上次运行", Width: 12},
 		ui.Column{Header: "退出码", Width: 6}, ui.Column{Header: "结果"})
-	if len(jobs.Jobs) == 0 {
-		table.Add(ui.C("没有登记的任务", Dim), "", "", "", "", "")
-	}
 	for _, job := range jobs.Jobs {
 		present, loaded := jobs.Scheduled(job.Name)
 		agent := ui.C("未安装", Dim)

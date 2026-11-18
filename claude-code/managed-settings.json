@@ -1,0 +1,18 @@
+{
+  "env": {
+    "CLAUDE_CODE_SHELL": "/opt/cc-runtime/bin/remote-shell/zsh"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/opt/cc-runtime/bin/remote-shell/session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

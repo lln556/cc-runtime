@@ -35,6 +35,10 @@ type ClientConfig struct {
 	Token   string `json:"token"`   // 每台开发机一个
 	TmpDir  string `json:"tmpDir"`  // 给 CLAUDE_CODE_TMPDIR 用的共享目录
 	Version int    `json:"version"` // 协议版本
+	// SharedDirs 是开发机和 Mac 路径相同的目录（工作区、下载目录、截图目录），
+	// Container 是开发机的容器名；都只用于 SessionStart hook 的说明。
+	SharedDirs []string `json:"sharedDirs,omitempty"`
+	Container  string   `json:"container,omitempty"`
 }
 
 // 客户端等待服务回应信号的时间；测试里可以改小。

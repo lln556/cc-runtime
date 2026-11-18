@@ -166,28 +166,72 @@ func checkMachine(cfg config.Config, r *checkReport, project deploy.Project, mac
 	}
 }
 
+// checkClaudeConfig 在开发机里检查 Claude Code 的系统级设置，并运行一次 SessionStart hook。
 func checkClaudeConfig(cfg config.Config, r *checkReport, machine, home string) {
+	read := func(path string) (string, bool) {
+		result, err := deploy.Exec(cfg, machine, "cat", path)
+		if err != nil || result.Code != 0 {
+			r.fail("%s：开发机里读不到 %s", machine, path)
+			return "", false
+		}
+		return result.Stdout, true
+	}
+	var managed struct {
+		Env   map[string]string `json:"env"`
+		Hooks map[string]any    `json:"hooks"`
+	}
+	if text, ok := read("/etc/claude-code/managed-settings.json"); ok {
+		err := json.Unmarshal([]byte(text), &managed)
+		hooks, _ := json.Marshal(managed.Hooks)
+		if err != nil {
+			r.fail("%s：/etc/claude-code/managed-settings.json 格式错误：%v", machine, err)
+		} else if managed.Env["CLAUDE_CODE_SHELL"] != remoteshell.ShellPath || !strings.Contains(string(hooks), remoteshell.SessionStartPath) {
+			r.fail("%s：/etc/claude-code/managed-settings.json 应设置 CLAUDE_CODE_SHELL=%s 和 SessionStart hook %s",
+				machine, remoteshell.ShellPath, remoteshell.SessionStartPath)
+		} else {
+			r.ok("%s：系统级设置（CLAUDE_CODE_SHELL、SessionStart hook）", machine)
+		}
+	}
+	var dropin struct {
+		Env map[string]string `json:"env"`
+	}
+	if text, ok := read("/etc/claude-code/managed-settings.d/remote-shell.json"); ok {
+		if json.Unmarshal([]byte(text), &dropin) != nil || dropin.Env["CLAUDE_CODE_TMPDIR"] != remoteshell.TmpDir(cfg, machine) {
+			r.fail("%s：managed-settings.d/remote-shell.json 的 CLAUDE_CODE_TMPDIR 应为 %s（entrypoint 按 CC_REMOTE_SHELL_TMPDIR 写入）",
+				machine, remoteshell.TmpDir(cfg, machine))
+		} else {
+			r.ok("%s：CLAUDE_CODE_TMPDIR=%s", machine, dropin.Env["CLAUDE_CODE_TMPDIR"])
+		}
+	}
+	if text, ok := read("/etc/claude-code/CLAUDE.md"); ok && !strings.Contains(text, "remote-shell") {
+		r.fail("%s：/etc/claude-code/CLAUDE.md 没有说明 Bash 在 Mac 上执行", machine)
+	}
+	input, _ := json.Marshal(map[string]string{"cwd": cfg.Workspace, "source": "startup", "hook_event_name": "SessionStart"})
+	result, err := deploy.Exec(cfg, machine, "sh", "-c", `printf '%s' "$1" | "$2"`, "sh", string(input), remoteshell.SessionStartPath)
+	var hook struct {
+		Output struct {
+			Context string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	switch {
+	case err != nil || result.Code != 0 || json.Unmarshal([]byte(result.Stdout), &hook) != nil:
+		r.fail("%s：SessionStart hook 运行失败：%s", machine, strings.TrimSpace(result.Stdout+" "+result.Stderr))
+	case !strings.Contains(hook.Output.Context, "macOS"):
+		r.fail("%s：SessionStart hook 没有得到 Mac 的信息：%s", machine, hook.Output.Context)
+	default:
+		first, _, _ := strings.Cut(hook.Output.Context, "。")
+		r.ok("%s：SessionStart hook：%s", machine, first)
+	}
+	// 家目录里早先手工写的配置已经由系统级设置取代。
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	var settings struct {
 		Env map[string]string `json:"env"`
 	}
-	data, err := os.ReadFile(settingsPath)
-	if err == nil {
-		err = json.Unmarshal(data, &settings)
-	}
-	if err != nil {
-		r.warn("%s：读不到 %s：%v", machine, settingsPath, err)
-	} else {
-		want := map[string]string{"CLAUDE_CODE_SHELL": remoteshell.ShellPath, "CLAUDE_CODE_TMPDIR": remoteshell.TmpDir(cfg, machine)}
+	if data, err := os.ReadFile(settingsPath); err == nil && json.Unmarshal(data, &settings) == nil {
 		for _, key := range []string{"CLAUDE_CODE_SHELL", "CLAUDE_CODE_TMPDIR"} {
-			if settings.Env[key] != want[key] {
-				r.warn("%s：settings.json 的 env.%s 应为 %s（现在是 %q）", machine, key, want[key], settings.Env[key])
-			} else {
-				r.ok("%s：settings.json 的 env.%s", machine, key)
+			if _, ok := settings.Env[key]; ok {
+				r.warn("%s：%s 里还有 env.%s，已被系统级设置覆盖，可以删掉", machine, settingsPath, key)
 			}
 		}
-	}
-	if data, err := os.ReadFile(filepath.Join(home, ".claude", "CLAUDE.md")); err != nil || !strings.Contains(string(data), "remote-shell") {
-		r.warn("%s：~/.claude/CLAUDE.md 里没有说明 Bash 在 Mac 上执行（见 docs/remote-shell.md）", machine)
 	}
 }

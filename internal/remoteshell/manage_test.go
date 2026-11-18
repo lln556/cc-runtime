@@ -23,16 +23,17 @@ func TestPort(t *testing.T) {
 
 func TestPrepareMachineKeepsToken(t *testing.T) {
 	cfg := testutil.MakeConfig(t, t.TempDir(), "")
-	if _, err := PrepareMachine(cfg, "dev-a", "172.30.0.4"); err == nil {
+	if _, err := PrepareMachine(cfg, Machine{Name: "dev-a", GatewayIP: "172.30.0.4"}); err == nil {
 		t.Fatal("没有开发机二进制时应该报错")
 	}
 	os.MkdirAll(BinSource(cfg), 0o755)
 	os.WriteFile(filepath.Join(BinSource(cfg), LinuxBinary), nil, 0o755)
-	first, err := PrepareMachine(cfg, "dev-a", "172.30.0.4")
+	first, err := PrepareMachine(cfg, Machine{Name: "dev-a", GatewayIP: "172.30.0.4", Container: "p-dev-a-1", SharedDirs: []string{"/w"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(first.Token) != 64 || first.Addr != "172.30.0.4:10024" || first.TmpDir != TmpDir(cfg, "dev-a") {
+	if len(first.Token) != 64 || first.Addr != "172.30.0.4:10024" || first.TmpDir != TmpDir(cfg, "dev-a") ||
+		first.Container != "p-dev-a-1" || len(first.SharedDirs) != 1 {
 		t.Fatalf("%+v", first)
 	}
 	for _, path := range []string{MachineDir(cfg, "dev-a"), TmpDir(cfg, "dev-a"), ClientConfigPath(cfg, "dev-a")} {
@@ -41,7 +42,7 @@ func TestPrepareMachineKeepsToken(t *testing.T) {
 			t.Fatalf("%s 权限不对：%v %v", path, info.Mode(), err)
 		}
 	}
-	second, err := PrepareMachine(cfg, "dev-a", "172.30.0.2")
+	second, err := PrepareMachine(cfg, Machine{Name: "dev-a", GatewayIP: "172.30.0.2"})
 	if err != nil || second.Token != first.Token || second.Addr != "172.30.0.2:10024" {
 		t.Fatalf("%+v %v", second, err)
 	}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -92,8 +93,17 @@ func readClientConfig(path string) (ClientConfig, error) {
 	return cfg, json.Unmarshal(data, &cfg)
 }
 
+// Machine 是 PrepareMachine 需要的、来自 Compose 模型的信息。
+type Machine struct {
+	Name       string
+	GatewayIP  string
+	Container  string
+	SharedDirs []string
+}
+
 // PrepareMachine 为开发机准备 remote-shell 目录和 client.json；已有的 token 沿用。
-func PrepareMachine(cfg config.Config, machine, gatewayIP string) (ClientConfig, error) {
+func PrepareMachine(cfg config.Config, m Machine) (ClientConfig, error) {
+	machine := m.Name
 	dir := MachineDir(cfg, machine)
 	for _, path := range []string{dir, TmpDir(cfg, machine)} {
 		if err := os.MkdirAll(path, 0o700); err != nil {
@@ -113,9 +123,10 @@ func PrepareMachine(cfg config.Config, machine, gatewayIP string) (ClientConfig,
 		}
 	}
 	port := TunnelPort
-	client := ClientConfig{Machine: machine, Addr: net.JoinHostPort(gatewayIP, strconv.Itoa(port)),
-		Token: token, TmpDir: TmpDir(cfg, machine), Version: ProtocolVersion}
-	if existing == client {
+	client := ClientConfig{Machine: machine, Addr: net.JoinHostPort(m.GatewayIP, strconv.Itoa(port)),
+		Token: token, TmpDir: TmpDir(cfg, machine), Version: ProtocolVersion,
+		SharedDirs: m.SharedDirs, Container: m.Container}
+	if reflect.DeepEqual(existing, client) {
 		return client, nil
 	}
 	data, err := json.MarshalIndent(client, "", "  ")

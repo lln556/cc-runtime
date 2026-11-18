@@ -40,6 +40,17 @@ if [ ! -e "/workspace" ] && [ ! -L "/workspace" ]; then
 fi
 sudo chown -h dev:dev /workspace
 
+# Claude Code 的临时目录因机器而异（Mac 上的路径），写成系统级设置的 drop-in；
+# 其余系统级设置在 /etc/claude-code/managed-settings.json。
+if [ -n "${CC_REMOTE_SHELL_TMPDIR:-}" ]; then
+    sudo mkdir -p /etc/claude-code/managed-settings.d
+    printf '{"env":{"CLAUDE_CODE_TMPDIR":"%s"}}\n' "$CC_REMOTE_SHELL_TMPDIR" \
+        | sudo tee /etc/claude-code/managed-settings.d/remote-shell.json > /dev/null
+    echo "✅ Claude Code temp dir: $CC_REMOTE_SHELL_TMPDIR"
+else
+    echo "⚠️  CC_REMOTE_SHELL_TMPDIR is not set; Claude Code scratchpad will not be shared with the Mac."
+fi
+
 # 写在家目录：工作区是 Mac 的目录，不往里放开发机的文件。
 README_FILE="/home/dev/环境说明.md"
 if [ ! -f "$README_FILE" ]; then

@@ -611,6 +611,10 @@ func Prepare(cfg config.Config, p Project, services []string) error {
 			machines = append(machines, name)
 		}
 	}
+	shared := []string{filepath.Clean(cfg.Workspace), filepath.Clean(cfg.Downloads)}
+	if dir, err := ScreenshotsMount(cfg); err == nil && dir != "" {
+		shared = append(shared, filepath.Clean(cfg.Screenshots))
+	}
 	for _, name := range machines {
 		s := p.Services[name]
 		uid, gid, err := imageIDs(s.Image)
@@ -634,7 +638,8 @@ func Prepare(cfg config.Config, p Project, services []string) error {
 		if err := initializeCache(p, s.Image, s, uid, gid); err != nil {
 			return err
 		}
-		if _, err := remoteshell.PrepareMachine(cfg, name, GatewayIP(p, name)); err != nil {
+		if _, err := remoteshell.PrepareMachine(cfg, remoteshell.Machine{Name: name, GatewayIP: GatewayIP(p, name),
+			Container: p.Name + "-" + name + "-1", SharedDirs: shared}); err != nil {
 			return err
 		}
 	}

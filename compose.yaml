@@ -31,6 +31,8 @@ services:
       XDG_CACHE_HOME: /home/dev/.cache
       WORKSPACE_DIR: ${WORKSPACE_DIR}
       DOWNLOADS_DIR: ${DOWNLOADS_DIR}
+      # Written by entrypoint.sh as a managed-settings drop-in (CLAUDE_CODE_TMPDIR).
+      CC_REMOTE_SHELL_TMPDIR: ${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp
     volumes:
       - {<<: *bind, source: ./dev-runtimes/dev-pennsylvania/ssh-host-keys, target: /var/lib/cc-runtime/ssh}
       - {<<: *bind, source: ./dev-runtimes/dev-pennsylvania/machine-id, target: /etc/machine-id, read_only: true}
@@ -49,6 +51,10 @@ services:
       - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania", target: /var/lib/cc-runtime/remote-shell, read_only: true}
       - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp"}
       - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
+      # Claude Code system settings (shell, SessionStart hook) and CLAUDE.md.
+      # Temporary mounts; they move into the image with the image slimming.
+      - {<<: *bind, source: ./claude-code/managed-settings.json, target: /etc/claude-code/managed-settings.json, read_only: true}
+      - {<<: *bind, source: ./claude-code/CLAUDE.md, target: /etc/claude-code/CLAUDE.md, read_only: true}
       - type: volume
         source: cache
         target: /home/dev/.cache
@@ -73,6 +79,8 @@ services:
       XDG_CACHE_HOME: /home/dev/.cache
       WORKSPACE_DIR: ${WORKSPACE_DIR}
       DOWNLOADS_DIR: ${DOWNLOADS_DIR}
+      # Written by entrypoint.sh as a managed-settings drop-in (CLAUDE_CODE_TMPDIR).
+      CC_REMOTE_SHELL_TMPDIR: ${RUNTIME_DIR}/remote-shell/dev-california/tmp
     volumes:
       - {<<: *bind, source: ./dev-runtimes/dev-california/ssh-host-keys, target: /var/lib/cc-runtime/ssh}
       - {<<: *bind, source: ./dev-runtimes/dev-california/machine-id, target: /etc/machine-id, read_only: true}
@@ -91,6 +99,10 @@ services:
       - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-california", target: /var/lib/cc-runtime/remote-shell, read_only: true}
       - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-california/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-california/tmp"}
       - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
+      # Claude Code system settings (shell, SessionStart hook) and CLAUDE.md.
+      # Temporary mounts; they move into the image with the image slimming.
+      - {<<: *bind, source: ./claude-code/managed-settings.json, target: /etc/claude-code/managed-settings.json, read_only: true}
+      - {<<: *bind, source: ./claude-code/CLAUDE.md, target: /etc/claude-code/CLAUDE.md, read_only: true}
       - type: volume
         source: cache
         target: /home/dev/.cache

@@ -42,6 +42,7 @@ GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
 mv -f "$bin_dir/.cc-runtime-linux.$$" "$bin_dir/cc-runtime-linux"
 # CLAUDE_CODE_SHELL 指向这个链接：Claude Code 只接受路径里含 bash 或 zsh 的 shell。
 ln -sfn ../cc-runtime-linux "$bin_dir/remote-shell/zsh"
+ln -sfn ../cc-runtime-linux "$bin_dir/remote-shell/session-start"
 echo "已安装 ${bin_dir}/cc-runtime-linux（linux/${arch}，开发机的 remote-shell 客户端）"
 
 if launchctl print "gui/$(id -u)/io.cc-runtime.remote-shell" >/dev/null 2>&1; then

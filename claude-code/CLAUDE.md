@@ -1,7 +1,7 @@
 # 执行环境（remote-shell）
 
 Bash 工具里的命令经 remote-shell 在宿主 Mac 上执行，运行在使用者的登录会话里，不在当前 Linux 容器里：
-`uname`、Homebrew、Xcode、钥匙串、已安装的依赖都以 Mac 为准；sed、find、date、grep 等是 BSD 版本，写命令时按 macOS 的参数习惯。
+`uname`、Homebrew、Xcode、钥匙串、已安装的依赖都以 Mac 为准。
 系统信息里的 `Platform`、`OS Version` 描述的是容器，不是命令执行的地方。会话开始时注入的上下文里有 Mac 的系统版本、架构、共享目录和临时目录；判断执行环境以它和 `uname` 为准。
 
 Read、Edit、Write 等文件工具在容器里执行。共享目录在两侧是同一份文件、同一个路径：工作区、下载目录，以及 Claude Code 的临时目录（scratchpad）。在共享目录里：

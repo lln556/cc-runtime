@@ -75,9 +75,16 @@ unset key
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 (( ! ${+functions[p10k]} )) || p10k finalize
 
+# zoxide：z 跳转目录，zi 交互选择。需要在 compinit 之后初始化。
+(( ! ${+commands[zoxide]} )) || eval "$(zoxide init zsh)"
+
+# fzf：Ctrl-R 搜索历史，Ctrl-T 搜索文件
+(( ! ${+commands[fzf]} )) || source <(fzf --zsh)
+
 alias claude="claude --dangerously-skip-permissions"
 alias zshc="vim ~/.zshrc"
 alias zshcc="exec zsh"
+alias j="zi"
 alias gcm="git commit -m "
 
 # Claude Code 的 Bash 工具（CLAUDECODE=1）按 bash 的习惯执行命令：未加引号的变量

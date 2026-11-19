@@ -30,6 +30,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # SSH 登录后编辑文件
     zsh \
     # 默认 Shell
+    fzf \
+    # 模糊查找，Ctrl-R 搜历史、Ctrl-T 搜文件，zoxide 的 zi 也用它
+    zoxide \
+    # 按使用频率跳转目录，命令 z / zi
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 生成 UTF-8 locale 并设为全局默认，否则 vim 等程序回退到 C locale，中文显示乱码。

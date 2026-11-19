@@ -48,7 +48,7 @@ var NotCopied = [][2]string{
 	{".aliyun", "遥测实例 ID 和日志（不含凭据）"},
 	{".config/go/telemetry", "Go 遥测状态"},
 	{".local/state, .config/herdr, .servercc", "会话状态"},
-	{".zhistory, .viminfo", "使用历史"},
+	{".local/share/zoxide, .zhistory, .viminfo", "使用历史"},
 	{".local/share/pki", "本机密钥（会重新生成）"},
 	{".zcompdump*, .zcompcache", "可重新生成的缓存"},
 }

@@ -134,6 +134,8 @@ hook 和客户端是同一个程序，按入口文件名分派（`remote-shell/z
 
 launchd 启动的进程只有系统目录的 PATH，而每条命令都启动登录 shell 要 0.5 秒，还会混入 `.zshrc` 插件的输出。服务运行一次 `zsh -l -i -c`，取出前后标记之间 NUL 分隔的 `env -0` 输出作为快照，缓存在内存和 `~/Library/Caches/cc-runtime/remote-shell/env.json`。`~/.zshenv`、`.zprofile`、`.zshrc`、`.zlogin` 的修改时间变化或超过 24 小时后重新生成。快照只有环境变量，不含 alias 和函数（例如 `nvm use` 这类 shell 函数不可用）。命令用非登录的 `zsh -c` 执行，只读 `~/.zshenv`。
 
+原生安装的 Claude Code 把 ugrep、bfs、ripgrep 打包在自己的二进制里，用快照里的同名函数接管 Bash 的 `grep`、`find`、`rg`，并停用了 Grep、Glob 工具。开发机里的快照是空的，命令又在 Mac 上执行，这层接管不存在：`grep`、`find` 是 macOS 自带的版本，`rg` 要 Mac 上装了才有。`cc-runtime check search-tools` 列出开发机里内置的版本，检查 Mac 上是否装了对应的工具；只检查，不安装，装不装、怎么装由使用者决定。
+
 ## 部署
 
 1. 端口默认 47100（`.env` 的 `REMOTE_SHELL_PORT`，改了要同时改网关配置里的 tunnel）。

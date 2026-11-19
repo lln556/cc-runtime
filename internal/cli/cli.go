@@ -56,7 +56,7 @@ func init() {
 		"schedule":  {"schedule {list|install|uninstall} [任务...] [--all]", "launchd 定时任务", cmdSchedule},
 		"job":       {"job {run|log} <任务> [-n 次数] [--json]", "立即运行任务，或查看其日志", cmdJob},
 		"seed-home": {"seed-home <来源家目录> <目标家目录> [--dry-run] [--credentials-only]", "用已有家目录初始化新机器的家目录", cmdSeedHome},
-		"check":     {"check {proxy|remote-shell}", "一致性检查", cmdCheck},
+		"check":     {"check {proxy|remote-shell|search-tools}", "一致性检查", cmdCheck},
 		"remote-shell": {"remote-shell {status|install|uninstall|restart|serve} [--force]",
 			"让开发机的 Bash 命令在 Mac 上执行的服务（LaunchAgent）", cmdRemoteShell},
 	}
@@ -336,12 +336,15 @@ func cmdCheck(cfg config.Config, args []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	what, err := choose("check", "检查项", positional, "proxy", "remote-shell")
+	what, err := choose("check", "检查项", positional, "proxy", "remote-shell", "search-tools")
 	if err != nil {
 		return 0, err
 	}
-	if what == "remote-shell" {
+	switch what {
+	case "remote-shell":
 		return checkRemoteShell(cfg)
+	case "search-tools":
+		return checkSearchTools(cfg)
 	}
 	results, err := checks.ProxyDifferences(filepath.Join(cfg.Root, "proxy"))
 	if err != nil {

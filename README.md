@@ -83,7 +83,7 @@
 | `cc-runtime job run \| log <任务>` | 立即运行任务，或查看运行记录 |
 | `cc-runtime seed-home <源> <目标>` | 用现有家目录初始化新开发机的家目录 |
 | `cc-runtime remote-shell status \| install \| uninstall \| restart [--force]` | Mac 上的 remote-shell 服务 |
-| `cc-runtime check proxy \| remote-shell` | 检查网关配置与模板是否一致、remote-shell 端到端可用 |
+| `cc-runtime check proxy \| remote-shell \| search-tools` | 检查网关配置与模板是否一致、remote-shell 端到端可用、Mac 上是否装了 Claude Code 内置的搜索工具 |
 
 Claude Code 要在工作区或下载目录里启动：开发机的 `/home/dev`、`/tmp` 在 Mac 上不存在，在那里启动时 Bash 命令会被拒绝。
 

@@ -90,8 +90,8 @@ func TestLaunchdDefinition(t *testing.T) {
 	}
 	first, _ := Get("daily")
 	second, _ := Get("frequent")
-	if first.ScheduleText() != "每天 04:00" || second.ScheduleText() != "每 5 分钟" {
-		t.Fatal(first.ScheduleText(), second.ScheduleText())
+	if first.ScheduleText(cfg) != "每天 04:00" || second.ScheduleText(cfg) != "每 5 分钟" {
+		t.Fatal(first.ScheduleText(cfg), second.ScheduleText(cfg))
 	}
 }
 

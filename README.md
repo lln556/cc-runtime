@@ -79,7 +79,7 @@
 | `cc-runtime status [--watch[=秒]]` | 状态面板：remote-shell、定时任务、磁盘、容器 |
 | `cc-runtime up [服务…] [--pull]` | 启动服务；先准备家目录、身份、缓存和 remote-shell 的机器目录 |
 | `cc-runtime compose <参数…>` | 本部署的 `docker compose` |
-| `cc-runtime schedule list \| install \| uninstall` | launchd 定时任务 |
+| `cc-runtime schedule list \| install \| uninstall` | launchd 定时任务（目前有 `wake-claude`：每天北京时间 08:30 ±10 秒在开发机里发一条请求唤醒 Claude，可在 `.env` 里配置，见 `.env.example`） |
 | `cc-runtime job run \| log <任务>` | 立即运行任务，或查看运行记录 |
 | `cc-runtime seed-home <源> <目标>` | 用现有家目录初始化新开发机的家目录 |
 | `cc-runtime remote-shell status \| install \| uninstall \| restart [--force]` | Mac 上的 remote-shell 服务 |

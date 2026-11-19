@@ -93,6 +93,9 @@ func JobsSection(cfg config.Config) *ui.Table {
 		} else if present {
 			agent = ui.C("仅有文件", Warn)
 		}
+		if present && jobs.Stale(cfg, job.Name) {
+			agent = ui.C("需重装", Warn)
+		}
 		record := jobs.LastRun(cfg, job.Name)
 		exit := ui.C("—", Dim)
 		started := ""
@@ -102,7 +105,7 @@ func JobsSection(cfg config.Config) *ui.Table {
 			}
 			started, _ = record["started"].(string)
 		}
-		table.Add(job.Name, job.ScheduleText(), agent, ago(started), exit, jobSummary(record))
+		table.Add(job.Name, job.ScheduleText(cfg), agent, ago(started), exit, jobSummary(record))
 	}
 	return table
 }

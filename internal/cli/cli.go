@@ -49,6 +49,7 @@ type command struct {
 var commands map[string]command
 
 func init() {
+	jobs.Exec = deploy.Exec
 	commands = map[string]command{
 		"status":    {"status [--watch[=秒]]", "整个运行环境的状态面板", cmdStatus},
 		"up":        {"up [服务...] [--pull] [--force-recreate] [--allow-orphans]", "启动服务", cmdUp},
@@ -239,6 +240,7 @@ func cmdSchedule(cfg config.Config, args []string) (int, error) {
 		}
 		table := ui.NewTable("", true, ui.Column{Header: "任务"}, ui.Column{Header: "计划"},
 			ui.Column{Header: "launchd"}, ui.Column{Header: "说明"})
+		stale := false
 		for _, job := range jobs.Jobs {
 			present, loaded := jobs.Scheduled(job.Name)
 			state := ui.C("未安装", ui.Dim)
@@ -247,9 +249,16 @@ func cmdSchedule(cfg config.Config, args []string) (int, error) {
 			} else if present {
 				state = ui.C("仅有文件", ui.Yellow)
 			}
-			table.Add(job.Name, job.ScheduleText(), state, job.Description)
+			if present && jobs.Stale(cfg, job.Name) {
+				state = ui.C("需重装", ui.Yellow)
+				stale = true
+			}
+			table.Add(job.Name, job.ScheduleText(cfg), state, job.Description)
 		}
 		table.Print()
+		if stale {
+			fmt.Println(ui.Yellow.S("已安装的 launchd 定义和当前配置不一致（配置、Mac 的时区或夏令时变了），请运行 cc-runtime schedule install --all"))
+		}
 		return 0, nil
 	}
 	names := positional[1:]
@@ -270,7 +279,7 @@ func cmdSchedule(cfg config.Config, args []string) (int, error) {
 		}
 		for _, name := range names {
 			job, _ := jobs.Get(name)
-			fmt.Printf("%s %s（%s）：%s\n", ui.Green.S("已安装"), name, job.ScheduleText(), jobs.PlistPath(name))
+			fmt.Printf("%s %s（%s）：%s\n", ui.Green.S("已安装"), name, job.ScheduleText(cfg), jobs.PlistPath(name))
 		}
 		return 0, nil
 	}

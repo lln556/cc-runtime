@@ -11,12 +11,16 @@ import (
 	"fmt"
 	"html"
 	"math"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	_ "time/tzdata" // 时区数据打进二进制，不依赖系统的 zoneinfo
 
 	"golang.org/x/sys/unix"
 
@@ -29,7 +33,67 @@ const (
 	LaunchdPath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 )
 
-type Calendar struct{ Hour, Minute int }
+// Calendar 是每天的运行时刻。Zone 是时刻所在的时区（IANA 名称，空表示 Mac 的本地时区）。
+// launchd 只按 Mac 的本地时区触发，所以安装时把时刻换算成 Mac 本地时间写进 plist；
+// Mac 的时区或夏令时变了，换算结果会变，plist 就和配置不一致（见 Stale）。
+// Jitter 大于 0 时实际运行时刻在目标时刻前后 Jitter 以内随机：launchd 提前一分钟启动，
+// 任务先等到随机时刻再运行。
+type Calendar struct {
+	Hour, Minute int
+	Zone         string
+	Jitter       time.Duration // 不超过 1 分钟
+}
+
+// 可在测试中替换。
+var (
+	now       = time.Now
+	localZone = func() *time.Location { return time.Local }
+)
+
+// macTime 是目标时刻（下一次出现时）换算成的 Mac 本地时间。
+func (c Calendar) macTime() (hour, minute int, err error) {
+	if c.Zone == "" {
+		return c.Hour, c.Minute, nil
+	}
+	zone, err := time.LoadLocation(c.Zone)
+	if err != nil {
+		return 0, 0, util.Errorf("未知时区 %q", c.Zone)
+	}
+	current := now().In(zone)
+	next := time.Date(current.Year(), current.Month(), current.Day(), c.Hour, c.Minute, 0, 0, zone)
+	if !next.After(current) {
+		next = time.Date(current.Year(), current.Month(), current.Day()+1, c.Hour, c.Minute, 0, 0, zone)
+	}
+	local := next.In(localZone())
+	return local.Hour(), local.Minute(), nil
+}
+
+// launchdTime 是写进 launchd 的启动时刻（Mac 本地时间）：有抖动时提前一分钟。
+func (c Calendar) launchdTime() (hour, minute int, err error) {
+	hour, minute, err = c.macTime()
+	if err != nil {
+		return 0, 0, err
+	}
+	total := hour*60 + minute
+	if c.Jitter > 0 {
+		total = (total + 24*60 - 1) % (24 * 60)
+	}
+	return total / 60, total % 60, nil
+}
+
+// delay 是 launchd 启动后要等的时间：一分钟减去 [-Jitter, +Jitter] 内的随机偏移。
+func (c Calendar) delay(random func(n int64) int64) time.Duration {
+	if c.Jitter <= 0 {
+		return 0
+	}
+	offset := time.Duration(random(int64(2*c.Jitter)+1)) - c.Jitter
+	return time.Minute + offset
+}
+
+// ScheduledEnv 由 launchd 设置，表示这次运行是定时触发的（手动 job run 不等待抖动）。
+const ScheduledEnv = "CC_RUNTIME_SCHEDULED"
+
+var sleep = time.Sleep
 
 type Job struct {
 	Name        string
@@ -39,9 +103,71 @@ type Job struct {
 	Interval    int       // 两次运行之间的秒数
 }
 
-func (j Job) ScheduleText() string {
-	if j.Calendar != nil {
-		return fmt.Sprintf("每天 %02d:%02d", j.Calendar.Hour, j.Calendar.Minute)
+// settingKey 是任务在 .env 里的配置名：wake-claude 的 TIME 是 WAKE_CLAUDE_TIME。
+func settingKey(job, setting string) string {
+	return strings.ToUpper(strings.ReplaceAll(job, "-", "_")) + "_" + setting
+}
+
+func setting(cfg config.Config, job, name string) (string, bool) {
+	value, ok := cfg.Env[settingKey(job, name)]
+	value = strings.TrimSpace(value)
+	return value, ok && value != ""
+}
+
+// CalendarFor 是任务实际的运行时刻：登记表里的默认值，可在 .env 里用
+// <任务>_TIME（HH:MM）、<任务>_TZ（IANA 时区名，例如 Asia/Shanghai）和
+// <任务>_JITTER（秒，0–60）覆盖。没有固定时刻的任务返回 nil。
+func (j Job) CalendarFor(cfg config.Config) (*Calendar, error) {
+	if j.Calendar == nil {
+		return nil, nil
+	}
+	c := *j.Calendar
+	if value, ok := setting(cfg, j.Name, "TIME"); ok {
+		parsed, err := time.Parse("15:04", value)
+		if err != nil {
+			return nil, util.Errorf("%s=%q 不是 HH:MM 格式的时刻", settingKey(j.Name, "TIME"), value)
+		}
+		c.Hour, c.Minute = parsed.Hour(), parsed.Minute()
+	}
+	if value, ok := setting(cfg, j.Name, "TZ"); ok {
+		if _, err := time.LoadLocation(value); err != nil || value == "Local" {
+			return nil, util.Errorf("%s=%q 不是 IANA 时区名（例如 Asia/Shanghai）", settingKey(j.Name, "TZ"), value)
+		}
+		c.Zone = value
+	}
+	if value, ok := setting(cfg, j.Name, "JITTER"); ok {
+		seconds, err := strconv.Atoi(value)
+		if err != nil || seconds < 0 || seconds > 60 {
+			return nil, util.Errorf("%s=%q 应为 0 到 60 之间的秒数", settingKey(j.Name, "JITTER"), value)
+		}
+		c.Jitter = time.Duration(seconds) * time.Second
+	}
+	return &c, nil
+}
+
+func (j Job) ScheduleText(cfg config.Config) string {
+	c, err := j.CalendarFor(cfg)
+	if err != nil {
+		return "配置有误：" + err.Error()
+	}
+	if c != nil {
+		text := fmt.Sprintf("每天 %02d:%02d", c.Hour, c.Minute)
+		if c.Zone != "" {
+			text += " " + c.Zone
+		}
+		var notes []string
+		if c.Jitter > 0 {
+			notes = append(notes, fmt.Sprintf("±%d 秒", int(c.Jitter.Seconds())))
+		}
+		if hour, minute, err := c.macTime(); err != nil {
+			notes = append(notes, err.Error())
+		} else if hour != c.Hour || minute != c.Minute {
+			notes = append(notes, fmt.Sprintf("Mac 本地 %02d:%02d", hour, minute))
+		}
+		if len(notes) > 0 {
+			text += "（" + strings.Join(notes, "，") + "）"
+		}
+		return text
 	}
 	if j.Interval >= 60 {
 		return fmt.Sprintf("每 %d 分钟", j.Interval/60)
@@ -50,7 +176,80 @@ func (j Job) ScheduleText() string {
 }
 
 // Jobs 是任务登记表，按显示顺序排列。
-var Jobs = []Job{}
+var Jobs = []Job{
+	{
+		Name:        "wake-claude",
+		Description: "唤醒开发机里的 Claude：发一条简短的请求",
+		Run:         runWakeClaude,
+		Calendar:    &Calendar{Hour: 8, Minute: 30, Zone: "Asia/Shanghai", Jitter: 10 * time.Second},
+	},
+}
+
+// wake-claude 的默认值；运行时可在 .env 里用 WAKE_CLAUDE_MACHINES（逗号分隔的
+// Compose 服务名）和 WAKE_CLAUDE_PROMPT 覆盖。
+var (
+	wakeMachines = []string{"dev-pennsylvania"}
+	wakePrompt   = "只回复 ok"
+)
+
+func wakeSettings(cfg config.Config) (machines []string, prompt string) {
+	machines, prompt = wakeMachines, wakePrompt
+	if value, ok := setting(cfg, "wake-claude", "MACHINES"); ok {
+		machines = nil
+		for _, item := range strings.Split(value, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				machines = append(machines, item)
+			}
+		}
+	}
+	if value, ok := setting(cfg, "wake-claude", "PROMPT"); ok {
+		prompt = value
+	}
+	return machines, prompt
+}
+
+// Exec 在开发机里以 dev 用户运行命令，由 cli 设为 deploy.Exec
+// （deploy 经 remoteshell 依赖本包，这里不能直接引用它）。
+var Exec func(cfg config.Config, service string, args ...string) (util.Result, error)
+
+// claudeExec 在开发机里运行 claude；测试中替换。
+var claudeExec = func(cfg config.Config, machine, prompt string) (util.Result, error) {
+	if Exec == nil {
+		return util.Result{}, util.Errorf("没有设置在开发机里运行命令的方法")
+	}
+	// 在工作区里启动：Bash 命令经 remote-shell 在 Mac 上执行，家目录在 Mac 上不存在。
+	script := `cd "${WORKSPACE_DIR:-$HOME}" && exec timeout 300 claude -p "$1" --output-format text`
+	return Exec(cfg, machine, "sh", "-c", script, "sh", prompt)
+}
+
+func runWakeClaude(cfg config.Config) (int, any, error) {
+	code := 0
+	summary := map[string]any{}
+	machines, prompt := wakeSettings(cfg)
+	for _, machine := range machines {
+		result, err := claudeExec(cfg, machine, prompt)
+		reply := strings.TrimSpace(result.Stdout)
+		if err != nil || result.Code != 0 {
+			code = 1
+			detail := strings.TrimSpace(result.Stdout + "\n" + result.Stderr)
+			if err != nil && detail == "" {
+				detail = err.Error()
+			}
+			summary[machine] = map[string]any{"exit": result.Code, "error": tail(detail, 500)}
+			continue
+		}
+		summary[machine] = map[string]any{"reply": tail(reply, 200)}
+	}
+	return code, summary, nil
+}
+
+func tail(text string, limit int) string {
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return "…" + string(runes[len(runes)-limit:])
+}
 
 func Names() []string {
 	names := make([]string, len(Jobs))
@@ -107,6 +306,11 @@ func RunJob(cfg config.Config, name string) (Record, error) {
 	job, err := Get(name)
 	if err != nil {
 		return Record{}, err
+	}
+	if os.Getenv(ScheduledEnv) == "1" {
+		if c, err := job.CalendarFor(cfg); err == nil && c != nil {
+			sleep(c.delay(rand.Int64N))
+		}
 	}
 	if err := os.MkdirAll(filepath.Join(cfg.StateDir(), "jobs"), 0o755); err != nil {
 		return Record{}, err
@@ -196,15 +400,23 @@ func Plist(cfg config.Config, name string) (string, error) {
 	entries := []KV{
 		{"Label", Label(name)},
 		{"ProgramArguments", []string{binary, "job", "run", name}},
-		{"EnvironmentVariables", []KV{{"CC_RUNTIME_ROOT", cfg.Root}, {"HOME", home}, {"PATH", LaunchdPath}}},
+		{"EnvironmentVariables", []KV{{"CC_RUNTIME_ROOT", cfg.Root}, {ScheduledEnv, "1"}, {"HOME", home}, {"PATH", LaunchdPath}}},
 		{"StandardOutPath", logPath},
 		{"StandardErrorPath", logPath},
 		{"ProcessType", "Background"},
 		{"LowPriorityIO", true},
 		{"Nice", 10},
 	}
-	if job.Calendar != nil {
-		entries = append(entries, KV{"StartCalendarInterval", []KV{{"Hour", job.Calendar.Hour}, {"Minute", job.Calendar.Minute}}})
+	calendar, err := job.CalendarFor(cfg)
+	if err != nil {
+		return "", err
+	}
+	if calendar != nil {
+		hour, minute, err := calendar.launchdTime()
+		if err != nil {
+			return "", err
+		}
+		entries = append(entries, KV{"StartCalendarInterval", []KV{{"Hour", hour}, {"Minute", minute}}})
 	}
 	if job.Interval > 0 {
 		entries = append(entries, KV{"StartInterval", job.Interval})
@@ -310,6 +522,17 @@ func Uninstall(names []string) error {
 		}
 	}
 	return nil
+}
+
+// Stale 表示已安装的 plist 和按当前配置生成的不一致（时刻、时区、Mac 的时区或夏令时、
+// 二进制路径变了），需要重新运行 schedule install。没有安装时返回 false。
+func Stale(cfg config.Config, name string) bool {
+	installed, err := os.ReadFile(PlistPath(name))
+	if err != nil {
+		return false
+	}
+	expected, err := Plist(cfg, name)
+	return err != nil || string(installed) != expected
 }
 
 // Scheduled 返回（agent 文件存在，agent 已加载到 launchd）。

@@ -201,12 +201,13 @@ services:
       timeout: 3s
       retries: 12
 
-  # Short-lived helpers that share a machine's network namespace to route it
-  # through its gateway. They never receive the proxy config or credentials.
+  # Helpers that share a machine's network namespace to route it through its
+  # gateway and keep the route alive across host/container restarts. They never
+  # receive the proxy config or credentials.
   dev-pennsylvania-network-init:
     image: metacubex/mihomo:latest
     network_mode: service:dev-pennsylvania
-    restart: "no"
+    restart: unless-stopped
     cap_add: [NET_ADMIN]
     depends_on:
       dev-pennsylvania:
@@ -218,7 +219,7 @@ services:
   dev-california-network-init:
     image: metacubex/mihomo:latest
     network_mode: service:dev-california
-    restart: "no"
+    restart: unless-stopped
     cap_add: [NET_ADMIN]
     environment:
       GATEWAY_IP: 172.30.0.4

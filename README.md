@@ -56,8 +56,6 @@
    cc-runtime status
    ```
 
-   `*-network-init` 设置完路由后退出，`Exited (0)` 是正常状态。
-
 6. **检查。** `cc-runtime check remote-shell`。开发机里 Claude Code 的 shell、临时目录、SessionStart hook 和 CLAUDE.md 由系统级设置提供（仓库的 `claude-code/`），家目录里不用配置，见 [remote-shell](docs/remote-shell.md#系统级设置)。
 
 7. **Tailscale（可选）。** `cc-runtime compose logs tailscale` 里有登录链接；登录后在管理后台为该设备关闭密钥过期。

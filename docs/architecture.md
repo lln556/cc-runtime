@@ -29,7 +29,7 @@ flowchart LR
 | `dev-pennsylvania`、`dev-california` | 仅私网（`.10`、`.11`） | 开发机：Claude Code、SSH |
 | `proxy-pennsylvania`、`proxy-california` | 私网（`.2`、`.4`）+ 出口网络 | 各自开发机的透明网关：TCP 代理、DNS、入站转发 |
 | `tailscale` | 私网（`.3`）+ 出口网络 | 从 tailnet 转发 SSH 到 `dev-pennsylvania:22`；为网关提供访问 tailnet 的 SOCKS5 出口 |
-| `*-network-init` | 临时共享对应开发机的网络命名空间 | 设置默认路由和 DNS 防绕过规则，然后退出 |
+| `*-network-init` | 共享对应开发机的网络命名空间 | 设置并维持默认路由和 DNS 防绕过规则 |
 
 开发机挂载的 Mac 目录都放在和 Mac 相同的路径上：工作区挂到 `WORKSPACE_DIR`，下载目录挂到 `DOWNLOADS_DIR`，配置了 `HOST_SCREENSHOTS_PATH` 时截图目录也只读挂到同一路径（目录不存在就不挂，由 `cc-runtime` 在调用 Compose 时生成叠加配置）；家目录里的 `~/workspace`、`~/Downloads` 是指向它们的链接。路径两侧相同，容器里的 Read/Edit 和 Mac 上的 Bash 看到的是同一个文件，git 记下的绝对路径（worktree、子模块）、使用者给出的 Mac 路径也都直接可用。worktree 要建在工作区之内，建在 `/tmp` 等地方的只有 Mac 一侧能看到。
 
@@ -44,7 +44,7 @@ remote-shell 另有三个挂载（`RUNTIME_DIR/remote-shell/<机器>` 和 `RUNTI
 - **没有直连回退。** 网关关闭内核 IP 转发并设置 `FORWARD DROP`；代理停止或上游不可用时，开发机的请求失败，而不是绕过代理。
 - **DNS 不能绕过网关。** 开发机只能向网关发 DNS；发往外部 DNS 地址的 53 端口流量也由网关接管，Docker 内置 DNS `127.0.0.11` 被阻断。因此容器之间用固定 IP 互访，不依赖服务名解析。
 - **普通 UDP 和 ICMP 不转发。** HTTP CONNECT 代理不能承载 UDP，QUIC/HTTP3 等会回退到 TCP 或不可用。IPv6 禁用。
-- **开发机不持有网络权限。** 只有临时的 `network-init` 获得 `NET_ADMIN`；开发机移除了 `NET_RAW`，sudo 也不能修改网络规则。开发机不设置代理环境变量，不共享网关的网络、配置和凭据。
+- **开发机不持有网络权限。** 只有独立的 `network-init` 辅助容器获得 `NET_ADMIN`；开发机移除了 `NET_RAW`，sudo 也不能修改网络规则。开发机不设置代理环境变量，不共享网关的网络、配置和凭据。
 
 分流规则（哪些域名直连、哪些走哪条代理链）在 `proxy/config.example.yaml` 里，所有网关共用；每个网关只在标记为 `GATEWAY-SPECIFIC` 的块里定义自己的出口。修改流程见 [`proxy/README.md`](../proxy/README.md)。
 

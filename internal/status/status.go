@@ -188,9 +188,6 @@ func ContainersSection(cfg config.Config) *ui.Table {
 			}
 		}
 		running := r.State == "running"
-		if strings.HasSuffix(service, "network-init") && !running {
-			continue // 一次性的辅助容器，退出是正常的
-		}
 		note := ui.C("", ui.None)
 		if len(configured) > 0 && !configured[service] {
 			note = ui.C("不在 compose.yaml 中（旧容器）", Warn)

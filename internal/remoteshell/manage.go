@@ -204,6 +204,7 @@ func Serve(cfg config.Config) error {
 		Shell:      "/bin/zsh",
 		SharedDirs: []string{filepath.Clean(cfg.Workspace), filepath.Clean(cfg.Downloads)},
 		Env:        snapshot.Get,
+		Preamble:   SearchFunctions(SearchToolsDir(cfg)),
 		Auth:       func() (map[string]string, error) { return Tokens(cfg) },
 		Logf:       logger.Printf,
 		State:      StateFile(StatePath(cfg), os.Getpid(), config.Version),

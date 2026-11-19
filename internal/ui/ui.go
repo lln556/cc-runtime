@@ -143,6 +143,7 @@ type Table struct {
 	Columns []Column
 	Header  bool
 	Expand  bool // 表头分隔线占满整个宽度
+	Gap     int  // 列间距，0 表示 2
 	Rows    [][]Cell
 }
 
@@ -168,7 +169,10 @@ func (t *Table) Add(cells ...any) {
 
 // Lines 按给定宽度排版；最后一列占用剩余宽度并折行。
 func (t *Table) Lines(width int) []string {
-	const gap = 2
+	gap := 2
+	if t.Gap > 0 {
+		gap = t.Gap
+	}
 	widths := make([]int, len(t.Columns))
 	for i, col := range t.Columns {
 		if col.Width > 0 {

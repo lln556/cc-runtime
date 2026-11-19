@@ -67,7 +67,7 @@ cwd 由子进程的工作目录传递，环境变量由进程环境传递。客�
 |---|---|
 | 工作目录 | 带上客户端的 cwd。Mac 上不存在时（例如在开发机的家目录启动 Claude Code）拒绝执行，提示说明原因、命令里的 `cd` 为什么也没用，以及在共享目录里重新启动 Claude Code。不换到别的目录执行：那样 Bash 和容器里的 Read/Edit 看到的相对路径就对不上了 |
 | cwd 回写 | 把末尾的 `pwd -P >| <文件>` 改成写到服务提供的临时文件，服务在退出帧里带回内容，客户端写到原来的文件。不依赖共享文件系统的缓存一致性 |
-| 快照 | Claude Code 启动时用 `-c -l <脚本>` 创建 shell 快照。客户端识别这类调用，在开发机里直接写一个空快照；命令前缀里的 `source` 在 Mac 上找不到文件，是空操作。Mac 的环境由服务提供 |
+| 快照 | Claude Code 启动时用 `-c -l <脚本>` 创建 shell 快照。客户端识别这类调用，在开发机里直接写一个空快照；命令前缀里的 `source` 在 Mac 上找不到文件，是空操作。Mac 的环境由服务提供，快照里接管 grep、find、rg 的函数由服务在命令前补上（见下文） |
 | 环境变量 | 只带 `CLAUDECODE`、`CLAUDE_CODE_ENTRYPOINT`、`CLAUDE_CODE_SESSION_ID`、`AI_AGENT`、`GIT_EDITOR`、`EDITOR`；`CC_REMOTE_ENV_<名字>` 去掉前缀后带过去。PATH、HOME、TMPDIR、容器里的 socket 一律不带 |
 | 临时目录 | `CLAUDE_CODE_TMPDIR` 设为每机目录里的 `tmp/`（同路径挂载）：Write 写进 scratchpad 的脚本，Mac 上的命令也能运行 |
 
@@ -134,7 +134,16 @@ hook 和客户端是同一个程序，按入口文件名分派（`remote-shell/z
 
 launchd 启动的进程只有系统目录的 PATH，而每条命令都启动登录 shell 要 0.5 秒，还会混入 `.zshrc` 插件的输出。服务运行一次 `zsh -l -i -c`，取出前后标记之间 NUL 分隔的 `env -0` 输出作为快照，缓存在内存和 `~/Library/Caches/cc-runtime/remote-shell/env.json`。`~/.zshenv`、`.zprofile`、`.zshrc`、`.zlogin` 的修改时间变化或超过 24 小时后重新生成。快照只有环境变量，不含 alias 和函数（例如 `nvm use` 这类 shell 函数不可用）。命令用非登录的 `zsh -c` 执行，只读 `~/.zshenv`。
 
-原生安装的 Claude Code 把 ugrep、bfs、ripgrep 打包在自己的二进制里，用快照里的同名函数接管 Bash 的 `grep`、`find`、`rg`，并停用了 Grep、Glob 工具。开发机里的快照是空的，命令又在 Mac 上执行，这层接管不存在：`grep`、`find` 是 macOS 自带的版本，`rg` 要 Mac 上装了才有。`cc-runtime check search-tools` 列出开发机里内置的版本，检查 Mac 上是否装了对应的工具；只检查，不安装，装不装、怎么装由使用者决定。
+### grep、find、rg
+
+原生安装的 Claude Code 把 ugrep、bfs、ripgrep 打包在自己的二进制里，在快照里定义同名函数，用 `ARGV0` 让二进制以对应工具的身份运行，接管 Bash 的 `grep`、`find`、`rg`；因此它也停用了 Grep、Glob 工具。开发机里的快照在 Mac 上不起作用，这层接管要由服务补上：服务在每条命令前定义同样的三个函数（`internal/remoteshell/search.go`），指向 `RUNTIME_DIR/search-tools/` 里的 `ugrep`、`bfs`、`rg`。
+
+- 程序从哪来由使用者决定：链接到 Mac 上的 Claude Code（`ln -s ~/.local/bin/claude …/ugrep`，它按调用名以对应工具运行，和开发机是同一套，随 Claude Code 自动更新）、Homebrew 安装后链接、自己下载都可以。cc-runtime 不下载、不安装。
+- 用函数，不把目录加进 PATH：只影响 Claude 直接写的命令，它运行的脚本、`make`、`xargs grep` 仍用系统的 grep、find，和原生一致。
+- 函数体照原生写法：`grep` 带 `--ignore-files`（跳过 `.gitignore` 里的文件）、`-I`、排除 `.git` 等目录，遇到 ugrep 不兼容的参数（`-Z`、`--null` 等）交给系统的 grep；`rg` 只在 PATH 里没有 rg 时定义；目录里没有对应程序时退回系统命令。
+- 同一个二进制以 `ug` 为名运行时是 ugrep 的简称（读 `.ugrep` 配置）。原生不接管它，这里和 `rg` 一样：目录里有、PATH 里没有时提供。
+
+`cc-runtime check search-tools` 列出开发机里 Claude Code 内置的工具版本，检查目录里的程序和版本，以及 Bash 里的 `grep`、`find`、`rg` 实际用的是什么；缺少时列出几种获取方式，由使用者自己选。
 
 ## 部署
 

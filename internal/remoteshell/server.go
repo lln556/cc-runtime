@@ -29,6 +29,7 @@ type Server struct {
 	Shell      string                            // 执行命令的 shell，例如 /bin/zsh
 	SharedDirs []string                          // 开发机和 Mac 共享的目录，写进工作目录不存在时的提示
 	Env        func() []string                   // 命令的基础环境（Mac 登录 shell 的快照）
+	Preamble   string                            // 加在每条命令前的 shell 代码（grep、find、rg 函数），以换行结尾
 	Auth       func() (map[string]string, error) // token → 机器名，每个请求都重新读取
 	Logf       func(format string, args ...any)  // 日志
 	State      func(active []Active)             // 进行中的命令变化时调用（写状态文件）
@@ -225,7 +226,7 @@ func (s *Server) run(conn net.Conn, writer *FrameWriter, machine string, request
 			overrides[CwdFileVar] = cwdFile
 		}
 	}
-	args := []string{"-c", string(request.Command)}
+	args := []string{"-c", s.Preamble + string(request.Command)}
 	for _, arg := range request.Args {
 		args = append(args, string(arg))
 	}

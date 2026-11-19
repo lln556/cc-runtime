@@ -31,3 +31,16 @@ func TestPanelKeepsWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestTableGap(t *testing.T) {
+	SetColor(false)
+	table := NewTable("", false, Column{}, Column{})
+	table.Add("a", "b")
+	if got := table.Lines(80)[0]; got != "a  b" {
+		t.Fatalf("默认间距：%q", got)
+	}
+	table.Gap = 4
+	if got := table.Lines(80)[0]; got != "a    b" {
+		t.Fatalf("Gap=4：%q", got)
+	}
+}

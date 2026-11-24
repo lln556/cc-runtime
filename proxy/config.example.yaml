@@ -160,6 +160,8 @@ rules:
   - DOMAIN,fonts.gstatic.com,airport
   - DOMAIN,deb.debian.org,airport
   - DOMAIN,security.debian.org,airport
+  - DOMAIN,archive.ubuntu.com,airport
+  - DOMAIN,security.ubuntu.com,airport
   - DOMAIN-SUFFIX,anthropic.com,egress
   - DOMAIN-SUFFIX,datadoghq.com,egress
   # Rust toolchain, documentation and Cargo registry downloads.

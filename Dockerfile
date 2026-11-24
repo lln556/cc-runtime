@@ -41,6 +41,12 @@ RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8
 
+# 安装 Node.js 24 LTS，Herdr 插件 herdr-auto-tab-name 用它直接运行 .mts。
+# Ubuntu 源里的 nodejs 编译时没带 TypeScript 类型剥离，所以用 NodeSource 的官方构建。
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # 安装 Herdr，二进制放到 /usr/local/bin
 RUN curl -fsSL https://herdr.dev/install.sh | env HERDR_INSTALL_DIR=/usr/local/bin sh
 

@@ -1,0 +1,93 @@
+#!/bin/sh
+# Antigravity (agy) 的 bash 垫片：只挂在 agy 包装器注入的 PATH 里，不影响交互终端。
+# Antigravity 的 run_command 工具固定按 PATH 调用 `bash -c <命令>`，没有可配置的 shell 项；
+# 这里把 `-c` 调用转交给 remote-shell 客户端（在宿主 Mac 的 zsh 里执行），并打开与 Bash 兼容的
+# zsh 选项。非共享目录或服务不可达时由 remote-shell 客户端直接报错退出，不静默回退到容器。
+
+self=$0
+while [ -L "$self" ]; do
+    link=$(readlink "$self")
+    case "$link" in
+        /*) self=$link ;;
+        *) self="$(dirname -- "$self")/$link" ;;
+    esac
+done
+SHIM_DIR=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd)
+REMOTE_ZSH=${REMOTE_SHELL_ZSH:-/opt/cc-runtime/bin/remote-shell/zsh}
+LOCAL_BASH=${REMOTE_SHELL_LOCAL_BASH:-/bin/bash}
+
+exec_local() {
+    new_path=""
+    old_ifs=$IFS
+    IFS=:
+    for entry in $PATH; do
+        [ -z "$entry" ] && continue
+        resolved=$(CDPATH= cd -- "$entry" 2>/dev/null && pwd || printf '%s' "$entry")
+        [ "$resolved" = "$SHIM_DIR" ] && continue
+        if [ -z "$new_path" ]; then
+            new_path="$entry"
+        else
+            new_path="$new_path:$entry"
+        fi
+    done
+    IFS=$old_ifs
+    PATH="$new_path" exec "$LOCAL_BASH" "$@"
+}
+
+if [ "${REMOTE_SHELL_LOCAL:-}" = "1" ] || [ ! -x "$REMOTE_ZSH" ]; then
+    exec_local "$@"
+fi
+
+# 解析到 `-c <命令>` 之前的选项，保留其后的位置参数（$0 $1 ...）。
+has_c=0
+skip=0
+cmd_str=""
+saw_flag_end=0
+for arg in "$@"; do
+    if [ "$saw_flag_end" -eq 0 ]; then
+        if [ "$arg" = "--" ]; then
+            saw_flag_end=1
+            skip=$((skip + 1))
+            continue
+        fi
+        case "$arg" in
+            --*)
+                skip=$((skip + 1))
+                continue
+                ;;
+            -*|+*)
+                case "$arg" in
+                    -*c*) has_c=1 ;;
+                esac
+                skip=$((skip + 1))
+                continue
+                ;;
+            *)
+                cmd_str="$arg"
+                break
+                ;;
+        esac
+    else
+        cmd_str="$arg"
+        break
+    fi
+done
+
+if [ "$has_c" -ne 1 ] || [ "$#" -le "$skip" ]; then
+    exec_local "$@"
+fi
+
+# 容器侧的 Antigravity hook 脚本位于开发机家目录或镜像目录，需留在容器内执行。
+case "$cmd_str" in
+    *"/.gemini/config/hooks/"*|*"/antigravity/session-start"*|*"/agy-remote-shell/session-start"*|*"herdr-agent-state.sh"*)
+        exec_local "$@"
+        ;;
+esac
+
+shift "$skip"
+cmd_str="$1"
+shift
+
+nl='
+'
+exec "$REMOTE_ZSH" -c "setopt sh_word_split clobber interactive_comments; unsetopt nomatch${nl}${cmd_str}" "$@"

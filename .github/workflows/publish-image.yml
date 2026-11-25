@@ -5,6 +5,7 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
+      - antigravity/**
       - claude-code/**
       - scripts/entrypoint.sh
       - shell/**

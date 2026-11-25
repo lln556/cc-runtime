@@ -1,2 +1,10 @@
 # 禁用 Ubuntu 全局 compinit，由 Zim 的 completion 模块统一初始化补全。
 skip_global_compinit=1
+
+# 非交互 zsh（如 ssh dev@host '<命令>'、脚本）不读 .zshrc；在这里补齐用户级工具 PATH。
+# 装了 Antigravity（~/.local/bin/agy）时，让 remote-shell 包装器排在前面。
+if [[ -x $HOME/.local/bin/agy ]]; then
+  export PATH="/opt/cc-runtime/antigravity:$HOME/.local/bin:$PATH"
+else
+  export PATH="$HOME/.local/bin:$PATH"
+fi

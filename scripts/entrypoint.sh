@@ -133,5 +133,16 @@ if [ -e "$CLAUDE_FILE" ]; then
     sudo chown dev:dev "$CLAUDE_FILE"
 fi
 
+# 若已安装 Antigravity（~/.local/bin/agy）或存在 ~/.gemini，写入 GEMINI.md 与 SessionStart hook；
+# 并在 /etc/environment 中让包装器优先于 ~/.local/bin，使 PAM/SSH 非交互会话同样生效。
+if [ -x /opt/cc-runtime/antigravity/setup ] && { [ -x /home/dev/.local/bin/agy ] || [ -d /home/dev/.gemini ]; }; then
+    /opt/cc-runtime/antigravity/setup /home/dev
+fi
+if [ -x /opt/cc-runtime/antigravity/agy ] && [ -x /home/dev/.local/bin/agy ]; then
+    sudo sed -i '/^PATH=/d' /etc/environment
+    printf '%s\n' 'PATH="/opt/cc-runtime/antigravity:/home/dev/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' \
+        | sudo tee -a /etc/environment > /dev/null
+fi
+
 echo "🚀 Cloud Dev Environment is ready. Welcome to AI Coding 3.0."
 tail -f /dev/null 

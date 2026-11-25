@@ -1,6 +1,6 @@
 # remote-shell
 
-remote-shell 让开发机里的 Claude Code 把 Bash 命令交给 Mac 执行：Claude Code 进程、它的身份和 API 出口仍在开发机里，命令在使用者的 Mac 登录会话里运行，看到的是 Mac 的 PATH、Homebrew、Xcode、钥匙串和已装的依赖。项目只需要一套 Mac 依赖，不必再维护 Linux 版本。
+remote-shell 让开发机里的编码代理（Claude Code、Antigravity 等）把命令交给 Mac 执行：代理进程、它的身份和 API 出口仍在开发机里，命令在使用者的 Mac 登录会话里运行，看到的是 Mac 的 PATH、Homebrew、Xcode、钥匙串和已装的依赖。项目只需要一套 Mac 依赖，不必再维护 Linux 版本。
 
 所有开发机都这样工作，没有第二种模式。
 
@@ -102,6 +102,20 @@ cwd 由子进程的工作目录传递，环境变量由进程环境传递。客�
 4. 总是以 0 退出，不阻塞会话。
 
 hook 和客户端是同一个程序，按入口文件名分派（`remote-shell/zsh`、`remote-shell/session-start`）。
+
+## 和 Antigravity 的衔接
+
+Antigravity CLI（`agy`，由使用者按需装在 `~/.local/bin/agy`）没有 `CLAUDE_CODE_SHELL` 这样的配置项：它的 `run_command` 工具固定按 `PATH` 查找 `bash` 并以 `bash -c <命令>` 执行，SessionStart hook 的输出格式也改为 `injectSteps`。镜像在 `/opt/cc-runtime/antigravity` 提供一层轻量桥接，复用同一套 remote-shell 客户端与服务：
+
+| 文件 | 作用 |
+| --- | --- |
+| `agy` | 包装器。只在 `~/.local/bin/agy` 存在时通过 `.zshenv`、`.zshrc`、`.bashrc` 和 `/etc/environment` 排在它前面；启动真正的 `agy` 前把 `antigravity/bin` 放到子进程树的 `PATH` 最前面，不影响开发机的交互终端和其他程序 |
+| `bin/bash` | `bash` 垫片。把带 `-c` 的调用转交给 `/opt/cc-runtime/bin/remote-shell/zsh`，并在命令前打开 `setopt sh_word_split clobber interactive_comments` 与 `unsetopt nomatch` 兼容常见 Bash 写法；`REMOTE_SHELL_LOCAL=1`、不带 `-c`（执行本地脚本文件）以及容器侧的 `.gemini` hook 调用则剥离垫片目录后交给 `/bin/bash` |
+| `session-start` | 调用 `/opt/cc-runtime/bin/remote-shell/session-start` 探测工作目录与 Mac 环境，把返回的 `additionalContext` 转成 Antigravity 识别的 `injectSteps` 系统消息 |
+| `GEMINI.md` | 与 `claude-code/CLAUDE.md` 对应的执行环境规则 |
+| `setup` | 入口脚本在检测到 `~/.local/bin/agy` 或 `~/.gemini` 时运行（`agy` 包装器首次启动时也会兜底执行）：幂等链接 `~/.gemini/GEMINI.md`（使用者已改成普通文件时不覆盖），并在 `~/.gemini/config/hooks.json` 中合并 `remote-shell` 的 `SessionStart` hook（保留 Herdr 等已有 hook）；若存在容器内 T3 Code 的 Antigravity provider 目录也一并建立链接 |
+
+和 Claude Code 一样，Antigravity 会话必须在共享目录里启动；在 `/home/dev` 等非共享目录启动或服务不可达时，命令由 remote-shell 客户端直接报错拒绝，不会静默退回 Linux 容器执行。
 
 ## 协议
 

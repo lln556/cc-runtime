@@ -91,9 +91,10 @@ Claude Code 要在工作区或下载目录里启动：开发机的 `/home/dev`�
 
 ```text
 compose.yaml          服务、网络、挂载
-Dockerfile            开发镜像：Claude Code、SSH、zsh，不含语言工具链（构建上下文只有 claude-code/、scripts/entrypoint.sh 和 shell/）
+Dockerfile            开发镜像：Claude Code、SSH、zsh，不含语言工具链（构建上下文只有 antigravity/、claude-code/、scripts/entrypoint.sh 和 shell/）
 shell/                镜像内的 shell 配置
 claude-code/          开发机里 Claude Code 的系统级设置和 CLAUDE.md（打进镜像的 /etc/claude-code）
+antigravity/          开发机里 Antigravity（agy）接入 remote-shell 的包装器、垫片、hook 和 GEMINI.md（打进镜像的 /opt/cc-runtime/antigravity）
 cmd/cc-runtime/       CLI 入口
 internal/             CLI 的各个部分（部署、remote-shell、定时任务、状态面板等）和测试
 scripts/install.sh    编译并安装 CLI

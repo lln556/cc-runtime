@@ -79,6 +79,8 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 # 本地文件放在工具安装之后，修改时复用 Claude Code 等工具层缓存。
 # Claude Code 的系统级设置：shell 指向 remote-shell、SessionStart hook、CLAUDE.md。
 COPY claude-code/ /etc/claude-code/
+# Antigravity（agy）接入 remote-shell 的包装器、bash 垫片、SessionStart hook 和 GEMINI.md。
+COPY antigravity/ /opt/cc-runtime/antigravity/
 COPY --chmod=0755 scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY shell/ /opt/cc-runtime/
 COPY --chmod=0755 shell/setup-shell.sh /opt/cc-runtime/setup-shell.sh
@@ -86,8 +88,9 @@ COPY --chmod=0755 shell/setup-shell.sh /opt/cc-runtime/setup-shell.sh
 # 安装 zim，并写入 .zshenv / .zshrc / .zimrc
 RUN /opt/cc-runtime/setup-shell.sh
 
-# bash 仍保留 Claude Code 的 PATH 和别名
+# bash 仍保留用户级工具的 PATH 和别名；装了 agy 时让包装器排在前面
 RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/dev/.bashrc && \
+    echo '[ -x "$HOME/.local/bin/agy" ] && export PATH="/opt/cc-runtime/antigravity:$PATH"' >> /home/dev/.bashrc && \
     echo 'alias claude="claude --dangerously-skip-permissions"' >> /home/dev/.bashrc
 
 EXPOSE 22

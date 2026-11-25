@@ -6,8 +6,12 @@
 # Environment
 #
 
-# Claude Code 在 ~/.local/bin
-export PATH="$HOME/.local/bin:$PATH"
+# Claude Code、Antigravity 等用户级工具在 ~/.local/bin；装了 agy 时让包装器排在前面。
+if [[ -x $HOME/.local/bin/agy ]]; then
+  export PATH="/opt/cc-runtime/antigravity:$HOME/.local/bin:$PATH"
+else
+  export PATH="$HOME/.local/bin:$PATH"
+fi
 
 # 镜像已生成 en_US.UTF-8；这里再导出一次，防止被外部环境覆盖成不存在的 locale。
 export LANG=en_US.UTF-8

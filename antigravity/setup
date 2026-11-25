@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""为开发机家目录幂等配置 Antigravity (agy) 的 GEMINI.md 与 SessionStart hook。"""
+
+import json
+import os
+from pathlib import Path
+import sys
+
+
+def chown_like(path: Path, uid: int, gid: int) -> None:
+    if os.geteuid() != 0:
+        return
+    try:
+        os.lchown(path, uid, gid)
+    except OSError:
+        pass
+
+
+def ensure_dir(path: Path, uid: int, gid: int) -> None:
+    if not path.exists():
+        path.mkdir(parents=True, exist_ok=True)
+        chown_like(path, uid, gid)
+
+
+def ensure_symlink(dest: Path, target: Path, managed_prefix: str, uid: int, gid: int) -> None:
+    if dest.is_symlink():
+        current = os.readlink(dest)
+        if current == str(target):
+            return
+        if not dest.exists() or current.startswith(managed_prefix):
+            dest.unlink()
+            dest.symlink_to(target)
+            chown_like(dest, uid, gid)
+        return
+    if not dest.exists():
+        dest.symlink_to(target)
+        chown_like(dest, uid, gid)
+
+
+def ensure_hooks(hooks_path: Path, session_start_cmd: str, uid: int, gid: int) -> None:
+    data: dict = {}
+    if hooks_path.exists() and not hooks_path.is_symlink():
+        try:
+            loaded = json.loads(hooks_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"⚠️  跳过格式异常的 {hooks_path}：{exc}", file=sys.stderr)
+            return
+        if not isinstance(loaded, dict):
+            print(f"⚠️  跳过非对象格式的 {hooks_path}", file=sys.stderr)
+            return
+        data = loaded
+
+    desired = {
+        "SessionStart": [
+            {
+                "type": "command",
+                "command": session_start_cmd,
+                "timeout": 10,
+            }
+        ]
+    }
+    if data.get("remote-shell") == desired and hooks_path.exists():
+        return
+
+    data["remote-shell"] = desired
+    serialized = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    tmp_path = hooks_path.with_name(f".{hooks_path.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(serialized, encoding="utf-8")
+    chown_like(tmp_path, uid, gid)
+    os.replace(tmp_path, hooks_path)
+
+
+def main() -> None:
+    home = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("HOME", "/home/dev"))
+    if not home.is_dir():
+        return
+
+    st = home.stat()
+    uid, gid = st.st_uid, st.st_gid
+
+    base_dir = Path(__file__).resolve().parent
+    gemini_md = base_dir / "GEMINI.md"
+    session_start = str(base_dir / "session-start")
+
+    gemini_dir = home / ".gemini"
+    config_dir = gemini_dir / "config"
+    ensure_dir(gemini_dir, uid, gid)
+    ensure_dir(config_dir, uid, gid)
+
+    home_gemini_md = gemini_dir / "GEMINI.md"
+    home_hooks_json = config_dir / "hooks.json"
+    ensure_symlink(home_gemini_md, gemini_md, str(base_dir), uid, gid)
+    ensure_hooks(home_hooks_json, session_start, uid, gid)
+
+    # T3 Code 在容器内运行 Antigravity provider 时使用独立配置目录；存在时一并桥接。
+    t3_providers = home / ".t3" / "userdata" / "providers" / "antigravity"
+    if t3_providers.is_dir():
+        for profile in sorted(t3_providers.iterdir()):
+            profile_cfg = profile / "config"
+            if not profile.is_dir() or not profile_cfg.is_dir():
+                continue
+            ensure_symlink(profile / "GEMINI.md", home_gemini_md, str(gemini_dir), uid, gid)
+            ensure_symlink(
+                profile_cfg / "hooks.json", home_hooks_json, str(gemini_dir), uid, gid
+            )
+
+
+if __name__ == "__main__":
+    main()

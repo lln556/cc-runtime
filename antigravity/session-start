@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Antigravity (agy) SessionStart hook：复用 remote-shell 探测结果并转换为 injectSteps。"""
+
+import json
+import os
+import subprocess
+import sys
+
+PROBE_BIN = os.environ.get(
+    "REMOTE_SHELL_SESSION_START", "/opt/cc-runtime/bin/remote-shell/session-start"
+)
+
+
+def main() -> None:
+    try:
+        raw = sys.stdin.read(1 << 20)
+        payload = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        payload = {}
+
+    if not isinstance(payload, dict):
+        payload = {}
+
+    cwd = payload.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        workspaces = payload.get("workspacePaths")
+        if isinstance(workspaces, list) and workspaces and isinstance(workspaces[0], str):
+            cwd = workspaces[0]
+        else:
+            cwd = os.getcwd()
+
+    if not os.path.isfile(PROBE_BIN) or not os.access(PROBE_BIN, os.X_OK):
+        print("{}")
+        return
+
+    try:
+        proc = subprocess.run(
+            [PROBE_BIN],
+            input=json.dumps({"cwd": cwd, "source": "startup"}),
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        data = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        ctx = (
+            data.get("hookSpecificOutput", {}).get("additionalContext", "")
+            if isinstance(data, dict)
+            else ""
+        )
+    except Exception:
+        ctx = ""
+
+    if not ctx:
+        print("{}")
+        return
+
+    ctx = (
+        ctx.replace("Claude Code 的临时目录（scratchpad 在其中）", "remote-shell 共享临时目录")
+        .replace("Platform、OS Version", "Operating System、Shell")
+        .replace("Claude Code", "Antigravity (agy)")
+        .replace("claude", "agy")
+        .replace("Bash 命令", "run_command 命令")
+        .replace("在 Bash 里", "在 run_command 里")
+    )
+
+    out = {
+        "injectSteps": [
+            {
+                "systemMessage": {
+                    "systemMessage": ctx,
+                }
+            }
+        ]
+    }
+    print(json.dumps(out, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

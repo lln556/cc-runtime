@@ -1,0 +1,41 @@
+#!/bin/sh
+# Antigravity (agy) 包装器：只给 agy 进程树把同目录下的 bin/（含 bash 垫片）放到 PATH
+# 最前面，使 run_command 的 bash -c 命令经 remote-shell 在宿主 Mac 上执行。
+
+self=$0
+while [ -L "$self" ]; do
+    link=$(readlink "$self")
+    case "$link" in
+        /*) self=$link ;;
+        *) self="$(dirname -- "$self")/$link" ;;
+    esac
+done
+WRAP_DIR=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd)
+SHIM_DIR="$WRAP_DIR/bin"
+
+# 首次运行（如在运行中的开发机里刚安装 agy）时补齐 ~/.gemini 的规则与 SessionStart hook。
+if [ -n "${HOME:-}" ] && { [ ! -e "$HOME/.gemini/GEMINI.md" ] || [ ! -f "$HOME/.gemini/config/hooks.json" ]; }; then
+    "$WRAP_DIR/setup" "$HOME" >/dev/null 2>&1 || true
+fi
+
+real_agy=""
+old_ifs=$IFS
+IFS=:
+for dir in $PATH "${HOME:-}/.local/bin"; do
+    [ -z "$dir" ] && continue
+    resolved=$(CDPATH= cd -- "$dir" 2>/dev/null && pwd || printf '%s' "$dir")
+    [ "$resolved" = "$WRAP_DIR" ] && continue
+    if [ -x "$dir/agy" ]; then
+        real_agy="$dir/agy"
+        break
+    fi
+done
+IFS=$old_ifs
+
+if [ -z "$real_agy" ]; then
+    echo "agy：未找到已安装的 Antigravity CLI（期望在 ~/.local/bin/agy）" >&2
+    exit 127
+fi
+
+export PATH="$SHIM_DIR:$PATH"
+exec "$real_agy" "$@"

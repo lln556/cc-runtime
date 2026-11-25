@@ -1,4 +1,6 @@
 # Paths come from .env (see .env.example). Compose does not expand "~": use absolute paths.
+name: cc-runtime
+
 x-dev-machine: &dev-machine
   image: ${DEV_IMAGE:-ghcr.io/zeke-chin/cc-runtime:latest}
   entrypoint: [/bin/bash, /usr/local/bin/entrypoint.sh]
@@ -13,16 +15,15 @@ x-bind: &bind
     create_host_path: false
 
 services:
-  # Development machine dev-pennsylvania; egress via proxy-pennsylvania.
-  # Each machine has its own home, SSH host keys and machine-id under
-  # dev-runtimes/<name>/. The Mac workspace is mounted directly at the same path;
-  # Claude Code's Bash commands run on the Mac through remote-shell
-  # (see docs/remote-shell.md).
-  dev-pennsylvania:
+  # Single development machine `dev`; egress via `proxy-dmit`.
+  # Both company (/Users/axis/weimob/projects) and personal (/Users/axis/projects)
+  # Mac workspaces are bind-mounted directly at the same paths.
+  # Claude Code's Bash commands run on the Mac through remote-shell.
+  dev:
     <<: *dev-machine
-    hostname: ab58b8f06991
+    hostname: f78404c51ff2
     depends_on:
-      proxy-pennsylvania:
+      proxy-dmit:
         condition: service_healthy
     environment:
       PASSWORD: ${PASSWORD:?Set PASSWORD in .env}
@@ -32,76 +33,33 @@ services:
       WORKSPACE_DIR: ${WORKSPACE_DIR}
       DOWNLOADS_DIR: ${DOWNLOADS_DIR}
       # Written by entrypoint.sh as a managed-settings drop-in (CLAUDE_CODE_TMPDIR).
-      CC_REMOTE_SHELL_TMPDIR: ${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp
+      CC_REMOTE_SHELL_TMPDIR: ${RUNTIME_DIR}/remote-shell/dev/tmp
     volumes:
-      - {<<: *bind, source: ./dev-runtimes/dev-pennsylvania/ssh-host-keys, target: /var/lib/cc-runtime/ssh}
-      - {<<: *bind, source: ./dev-runtimes/dev-pennsylvania/machine-id, target: /etc/machine-id, read_only: true}
-      - {<<: *bind, source: ./dev-runtimes/dev-pennsylvania/machine-id, target: /var/lib/dbus/machine-id, read_only: true}
-      - {<<: *bind, source: ./dev-runtimes/dev-pennsylvania/home, target: /home/dev}
-      # The Mac workspace at the same path, so paths are identical for Read/Edit
-      # in the container and Bash on the Mac. ~/workspace is a link to it.
+      - {<<: *bind, source: ./dev-runtimes/dev/ssh-host-keys, target: /var/lib/cc-runtime/ssh}
+      - {<<: *bind, source: ./dev-runtimes/dev/machine-id, target: /etc/machine-id, read_only: true}
+      - {<<: *bind, source: ./dev-runtimes/dev/machine-info, target: /etc/machine-info, read_only: true}
+      - {<<: *bind, source: ./dev-runtimes/dev/machine-id, target: /var/lib/dbus/machine-id, read_only: true}
+      - {<<: *bind, source: ./dev-runtimes/dev/home, target: /home/dev}
+      # Direct same-path Mac workspace mounts (company + personal) and Downloads.
       - {<<: *bind, source: "${WORKSPACE_DIR:?Set WORKSPACE_DIR in .env}", target: "${WORKSPACE_DIR}"}
+      - {<<: *bind, source: /Users/axis/projects, target: /Users/axis/projects}
       - {<<: *bind, source: "${DOWNLOADS_DIR:?Set DOWNLOADS_DIR in .env}", target: "${DOWNLOADS_DIR}"}
-      # remote-shell: client.json (read-only, at the client's fixed path), the
-      # shared temp dir for CLAUDE_CODE_TMPDIR (same path as on the Mac), and
-      # the Linux client built by scripts/install.sh.
-      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/remote-shell/dev-pennsylvania", target: /var/lib/cc-runtime/remote-shell, read_only: true}
-      - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-pennsylvania/tmp"}
+      # remote-shell: client.json (read-only), shared temp dir, T3 worktrees dir, and Linux client bin.
+      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/remote-shell/dev", target: /var/lib/cc-runtime/remote-shell, read_only: true}
+      - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev/tmp", target: "${RUNTIME_DIR}/remote-shell/dev/tmp"}
+      - {<<: *bind, source: "${RUNTIME_DIR}/t3-worktrees/dev", target: "${RUNTIME_DIR}/t3-worktrees/dev"}
       - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
       - type: volume
         source: cache
         target: /home/dev/.cache
-        volume: {nocopy: true, subpath: "${DEV_PENNSYLVANIA_CACHE:-dev-pennsylvania}"}
+        volume: {nocopy: true, subpath: "${DEV_CACHE:-dev}"}
       - ./scripts/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./proxy/resolv.conf:/etc/resolv.conf:ro
     networks:
       private:
         ipv4_address: 172.30.0.10
 
-  # Development machine dev-california; egress via proxy-california (California node).
-  dev-california:
-    <<: *dev-machine
-    hostname: dev-california
-    depends_on:
-      proxy-california:
-        condition: service_healthy
-    environment:
-      PASSWORD: ${PASSWORD:?Set PASSWORD in .env}
-      TZ: America/Los_Angeles
-      PYTHONPYCACHEPREFIX: /home/dev/.cache/python/pycache
-      XDG_CACHE_HOME: /home/dev/.cache
-      WORKSPACE_DIR: ${WORKSPACE_DIR}
-      DOWNLOADS_DIR: ${DOWNLOADS_DIR}
-      # Written by entrypoint.sh as a managed-settings drop-in (CLAUDE_CODE_TMPDIR).
-      CC_REMOTE_SHELL_TMPDIR: ${RUNTIME_DIR}/remote-shell/dev-california/tmp
-    volumes:
-      - {<<: *bind, source: ./dev-runtimes/dev-california/ssh-host-keys, target: /var/lib/cc-runtime/ssh}
-      - {<<: *bind, source: ./dev-runtimes/dev-california/machine-id, target: /etc/machine-id, read_only: true}
-      - {<<: *bind, source: ./dev-runtimes/dev-california/machine-id, target: /var/lib/dbus/machine-id, read_only: true}
-      - {<<: *bind, source: ./dev-runtimes/dev-california/home, target: /home/dev}
-      # The Mac workspace at the same path, so paths are identical for Read/Edit
-      # in the container and Bash on the Mac. ~/workspace is a link to it.
-      - {<<: *bind, source: "${WORKSPACE_DIR:?Set WORKSPACE_DIR in .env}", target: "${WORKSPACE_DIR}"}
-      - {<<: *bind, source: "${DOWNLOADS_DIR:?Set DOWNLOADS_DIR in .env}", target: "${DOWNLOADS_DIR}"}
-      # remote-shell: client.json (read-only, at the client's fixed path), the
-      # shared temp dir for CLAUDE_CODE_TMPDIR (same path as on the Mac), and
-      # the Linux client built by scripts/install.sh.
-      - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/remote-shell/dev-california", target: /var/lib/cc-runtime/remote-shell, read_only: true}
-      - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-california/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-california/tmp"}
-      - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
-      - type: volume
-        source: cache
-        target: /home/dev/.cache
-        volume: {nocopy: true, subpath: "${DEV_CALIFORNIA_CACHE:-dev-california}"}
-      - ./scripts/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./proxy/resolv-california.conf:/etc/resolv.conf:ro
-    networks:
-      private:
-        ipv4_address: 172.30.0.11
-
-  # Inbound: tailnet SSH to dev-pennsylvania (Serve). Outbound: a SOCKS5
-  # listener the gateways use to reach tailnet addresses; only the gateways
-  # may connect to it (see tailscale-entrypoint.sh).
+  # Inbound: tailnet SSH to dev (Serve). Outbound: SOCKS5 listener for tailnet access.
   tailscale:
     image: tailscale/tailscale:stable
     restart: unless-stopped
@@ -111,15 +69,13 @@ services:
       TS_HOSTNAME: ${TS_HOSTNAME:-cc-dev}
       TS_STATE_DIR: /var/lib/tailscale
       TS_AUTH_ONCE: "true"
-      # Allow time for the first interactive browser login (default is only 60s).
       TS_BOOT_TIMEOUT: 30m
       TS_USERSPACE: "true"
       TS_ACCEPT_DNS: "false"
       TS_SERVE_CONFIG: /config/serve.json
-      # Private address only: unreachable from the outbound network.
       TS_SOCKS5_SERVER: 172.30.0.3:1055
       SOCKS5_PORT: "1055"
-      SOCKS5_CLIENTS: 172.30.0.2 172.30.0.4
+      SOCKS5_CLIENTS: "172.30.0.2"
     volumes:
       - ./scripts/tailscale-entrypoint.sh:/scripts/tailscale-entrypoint.sh:ro
       - type: bind
@@ -133,7 +89,7 @@ services:
         ipv4_address: 172.30.0.3
       outbound: {}
 
-  proxy-pennsylvania:
+  proxy-dmit:
     image: metacubex/mihomo:latest
     environment:
       PASSWORD: ${PASSWORD:?Set PASSWORD in .env}
@@ -146,7 +102,7 @@ services:
     volumes:
       - ./scripts/proxy-entrypoint.sh:/scripts/proxy-entrypoint.sh:ro
       - type: bind
-        source: ./proxy/config-pennsylvania.yaml
+        source: ./proxy/config-dev.yaml
         target: /root/.config/mihomo/config.yaml
         read_only: true
         bind:
@@ -164,74 +120,19 @@ services:
       timeout: 3s
       retries: 12
 
-  # Second gateway whose final egress is the California node.
-  # Serves dev-california (CLIENT_IP).
-  proxy-california:
+  dev-network-init:
     image: metacubex/mihomo:latest
-    environment:
-      PASSWORD: ${PASSWORD:?Set PASSWORD in .env}
-      GATEWAY_IP: 172.30.0.4
-      CLIENT_IP: 172.30.0.11
-    restart: unless-stopped
-    cap_add: [NET_ADMIN]
-    sysctls:
-      net.ipv4.ip_forward: "0"
-      net.ipv6.conf.all.disable_ipv6: "1"
-    entrypoint: [/bin/sh, /scripts/proxy-entrypoint.sh]
-    volumes:
-      - ./scripts/proxy-entrypoint.sh:/scripts/proxy-entrypoint.sh:ro
-      - type: bind
-        source: ./proxy/config-california.yaml
-        target: /root/.config/mihomo/config.yaml
-        read_only: true
-        bind:
-          create_host_path: false
-    networks:
-      private:
-        ipv4_address: 172.30.0.4
-      outbound: {}
-    ports:
-      - "127.0.0.1:19091:9090"
-      - "127.0.0.1:17890:7890"
-      # dev-california SSH via a fixed DIRECT tunnel.
-      - "127.0.0.1:2223:10022"
-    healthcheck:
-      test: [CMD-SHELL, "nc -z 127.0.0.1 9090 && nc -z 127.0.0.1 53"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-
-  # Helpers that share a machine's network namespace to route it through its
-  # gateway and keep the route alive across host/container restarts. They never
-  # receive the proxy config or credentials.
-  dev-pennsylvania-network-init:
-    image: metacubex/mihomo:latest
-    network_mode: service:dev-pennsylvania
+    network_mode: service:dev
     restart: unless-stopped
     cap_add: [NET_ADMIN]
     depends_on:
-      dev-pennsylvania:
-        condition: service_started
-    entrypoint: [/bin/sh, /scripts/dev-network-init.sh]
-    volumes:
-      - ./scripts/dev-network-init.sh:/scripts/dev-network-init.sh:ro
-
-  dev-california-network-init:
-    image: metacubex/mihomo:latest
-    network_mode: service:dev-california
-    restart: unless-stopped
-    cap_add: [NET_ADMIN]
-    environment:
-      GATEWAY_IP: 172.30.0.4
-    depends_on:
-      dev-california:
+      dev:
         condition: service_started
     entrypoint: [/bin/sh, /scripts/dev-network-init.sh]
     volumes:
       - ./scripts/dev-network-init.sh:/scripts/dev-network-init.sh:ro
 
 volumes:
-  # Per-machine ~/.cache (subpaths in .env). External, so `down -v` keeps it.
   cache:
     external: true
     name: ${CACHE_VOLUME:-cc-runtime-cache}

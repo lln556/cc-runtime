@@ -128,6 +128,10 @@ tunnels:
 rules:
   # Tailnet (Tailscale CGNAT range) through the tailscale service; no fallback.
   - IP-CIDR,100.64.0.0/10,tailnet,no-resolve
+  # ==== GATEWAY-SPECIFIC: Sub2API direct host ====
+  # ==== END GATEWAY-SPECIFIC ====
+  - DOMAIN-SUFFIX,aliyuncs.com,DIRECT
+  - IP-CIDR,8.154.36.79/32,DIRECT,no-resolve
   - DOMAIN-SUFFIX,aliyuncs.com,DIRECT
   - IP-CIDR,8.154.36.79/32,DIRECT,no-resolve
   # Single host that must not traverse the proxy chain (fill in the real IP).

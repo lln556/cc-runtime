@@ -133,15 +133,36 @@ if [ -e "$CLAUDE_FILE" ]; then
     sudo chown dev:dev "$CLAUDE_FILE"
 fi
 
-# 若已安装 Antigravity（~/.local/bin/agy）或存在 ~/.gemini，写入 GEMINI.md 与 SessionStart hook；
-# 并在 /etc/environment 中让包装器优先于 ~/.local/bin，使 PAM/SSH 非交互会话同样生效。
-if [ -x /opt/cc-runtime/antigravity/setup ] && { [ -x /home/dev/.local/bin/agy ] || [ -d /home/dev/.gemini ]; }; then
-    /opt/cc-runtime/antigravity/setup /home/dev
+# 优先使用镜像内的 /opt/cc-runtime/antigravity；旧镜像未包含时回退到持久家目录里的副本。
+AGY_WRAP_DIR="/opt/cc-runtime/antigravity"
+if [ ! -x "$AGY_WRAP_DIR/agy" ] && [ -x /home/dev/.local/lib/agy-remote-shell/agy ]; then
+    AGY_WRAP_DIR="/home/dev/.local/lib/agy-remote-shell"
 fi
-if [ -x /opt/cc-runtime/antigravity/agy ] && [ -x /home/dev/.local/bin/agy ]; then
+if [ -x "$AGY_WRAP_DIR/setup" ] && { [ -x /home/dev/.local/bin/agy ] || [ -d /home/dev/.gemini ]; }; then
+    "$AGY_WRAP_DIR/setup" /home/dev
+fi
+if [ -x "$AGY_WRAP_DIR/agy" ] && [ -x /home/dev/.local/bin/agy ]; then
     sudo sed -i '/^PATH=/d' /etc/environment
-    printf '%s\n' 'PATH="/opt/cc-runtime/antigravity:/home/dev/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' \
+    printf 'PATH="%s:/home/dev/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"\n' "$AGY_WRAP_DIR" \
         | sudo tee -a /etc/environment > /dev/null
+fi
+
+if [ -x /home/dev/.local/bin/cc-switch ]; then
+    /home/dev/.local/bin/cc-switch daemon start --detach >/tmp/cc-switch-daemon.log 2>&1 || true
+fi
+
+if [ -f /home/dev/.t3/t3-lan-forwarder.py ]; then
+    nohup python3 /home/dev/.t3/t3-lan-forwarder.py >/tmp/t3-lan-forwarder.log 2>&1 &
+fi
+
+if [ -x /home/dev/.t3/runtime/versions/0.1.11/t3 ]; then
+    (
+        cd /home/dev
+        export SHELL=/bin/zsh
+        export PATH="$AGY_WRAP_DIR:/home/dev/.local/bin:/home/dev/.local/share/swiftly/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        nohup /home/dev/.t3/runtime/versions/0.1.11/t3 serve --host 127.0.0.1 --port 3773 --base-dir /home/dev/.t3 >> /home/dev/.t3/ssh-launch/c365cb87c3b38122/server.log 2>&1 </dev/null &
+        echo $! > /home/dev/.t3/ssh-launch/c365cb87c3b38122/pid
+    )
 fi
 
 echo "🚀 Cloud Dev Environment is ready. Welcome to AI Coding 3.0."

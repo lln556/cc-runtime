@@ -106,6 +106,67 @@ class MailboxTests(unittest.TestCase):
                               "instructions": self.instructions, "socket": self.root / "rpc.sock",
                               "projects": {"test": {"path": self.repo}}, "task_timeout_seconds": 10}, self.rpc)
         self.worker.prepare()
+        self.cwd = patch("bridge.Path.cwd", return_value=self.repo)
+        self.cwd.start()
+        self.addCleanup(self.cwd.stop)
+
+    def test_project_is_inferred_from_repository_even_in_subdirectory(self):
+        child = self.repo / "src"
+        child.mkdir()
+        with patch("bridge.Path.cwd", return_value=child):
+            result = submit(self.worker.mailbox, None, "Run tests", git_head(self.repo),
+                            "Local tests only", title="测试")
+        request = read(self.worker.mailbox / "inbox" / (result["task_id"] + ".json"))
+        self.assertEqual(request["project"], "test")
+        self.assertEqual(request["caller_repo"], str(self.repo.resolve()))
+
+    def test_wrong_explicit_project_is_rejected_even_with_same_commit(self):
+        self.worker.config["projects"]["yue"] = {"path": self.root / "other"}
+        self.worker.heartbeat()
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            submit(self.worker.mailbox, "yue", "Run tests", git_head(self.repo), "tests", title="测试")
+        self.assertEqual(list((self.worker.mailbox / "inbox").iterdir()), [])
+
+    def test_cli_submission_needs_no_project_argument(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            main(["--mailbox", str(self.worker.mailbox), "submit", "--title", "验证", "--task", "Run tests"])
+        identifier = json.loads(output.getvalue())["task_id"]
+        request = read(self.worker.mailbox / "inbox" / (identifier + ".json"))
+        self.assertEqual(request["project"], "test")
+        self.assertEqual(request["expected_commit"], git_head(self.repo))
+
+    def test_nested_repository_does_not_inherit_parent_mapping(self):
+        nested = self.repo / "nested"
+        subprocess.run(["git", "init", "-q", str(nested)], check=True)
+        with patch("bridge.Path.cwd", return_value=nested), self.assertRaisesRegex(ValueError, "No project mapping"):
+            submit(self.worker.mailbox, "test", "test", git_head(self.repo), "tests", title="测试")
+
+    def test_unmapped_and_ambiguous_repositories_are_rejected(self):
+        self.worker.config["projects"] = {"other": {"path": self.root / "other"}}
+        self.worker.heartbeat()
+        with self.assertRaisesRegex(ValueError, "No project mapping"):
+            submit(self.worker.mailbox, None, "test", git_head(self.repo), "tests", title="测试")
+        self.worker.config["projects"] = {name: {"path": self.repo} for name in ["one", "two"]}
+        self.worker.heartbeat()
+        with self.assertRaisesRegex(ValueError, "Ambiguous"):
+            submit(self.worker.mailbox, "one", "test", git_head(self.repo), "tests", title="测试")
+
+    def test_client_alias_routes_to_host_repository_and_worker_rechecks_it(self):
+        self.worker.config["projects"]["test"]["client_paths"] = ["/home/dev/workspace/test"]
+        self.worker.heartbeat()
+        with patch("bridge.git_root", return_value=Path("/home/dev/workspace/test")):
+            result = submit(self.worker.mailbox, None, "test", git_head(self.repo), "tests", title="测试")
+        request = read(self.worker.mailbox / "inbox" / (result["task_id"] + ".json"))
+        self.rpc.completed()
+        self.worker.run_task(request)
+        self.assertEqual(self.status(request)["state"], "completed")
+        self.assertEqual(next(params["cwd"] for method, params in self.rpc.calls if method == "thread/start"), str(self.repo))
+        forged = self.request(caller_repo="/home/dev/workspace/wrong")
+        calls = len(self.rpc.calls)
+        self.worker.run_task(forged)
+        self.assertEqual(self.status(forged)["state"], "failed")
+        self.assertEqual(len(self.rpc.calls), calls)
 
     def request(self, **overrides):
         result = submit(self.worker.mailbox, "test", "Run tests", git_head(self.repo), "Local tests only", title="测试验证")

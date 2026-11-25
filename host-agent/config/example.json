@@ -16,6 +16,7 @@
   "projects": {
     "cc-runtime": {
       "path": "../..",
+      "client_paths": [],
       "sandbox": "danger-full-access"
     }
   }

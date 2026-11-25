@@ -78,6 +78,30 @@ def git_head(path):
         stderr=subprocess.DEVNULL, timeout=10).strip()
 
 
+def git_root(path):
+    return Path(subprocess.check_output(
+        ["git", "-C", str(path), "rev-parse", "--show-toplevel"], text=True,
+        stderr=subprocess.DEVNULL, timeout=10).strip()).resolve()
+
+
+def project_paths(projects):
+    return {name: [str(Path(project["path"]).resolve()), *project.get("client_paths", [])]
+            for name, project in projects.items()}
+
+
+def select_project(paths, caller_repo, explicit=None):
+    # Match the Git root exactly: a nested repository must not inherit its
+    # parent's project, and identical commits do not establish project identity.
+    matches = [name for name, roots in paths.items() if str(caller_repo) in roots]
+    if not matches:
+        raise ValueError(f"No project mapping for repository {caller_repo}; configure its host path and client_paths")
+    if len(matches) != 1:
+        raise ValueError(f"Ambiguous project mapping for {caller_repo}: {', '.join(matches)}")
+    if explicit is not None and explicit != matches[0]:
+        raise ValueError(f"--project {explicit} does not match repository {caller_repo} (project {matches[0]})")
+    return matches[0]
+
+
 def config(path):
     path = Path(path).expanduser().resolve()
     data = read(path)
@@ -104,6 +128,11 @@ def config(path):
     for project in data["projects"].values():
         item = Path(project["path"]).expanduser()
         project["path"] = (item if item.is_absolute() else path.parent / item).resolve()
+        aliases = project.get("client_paths", [])
+        if (not isinstance(aliases, list) or any(
+                not isinstance(alias, str) or not Path(alias).is_absolute() for alias in aliases)):
+            raise ValueError("Project client_paths must be a list of absolute repository paths")
+        project["client_paths"] = [os.path.normpath(alias) for alias in aliases]
         if project.get("sandbox", "workspace-write") not in {"workspace-write", "read-only", "danger-full-access"}:
             raise ValueError("Project sandbox must be workspace-write, read-only or danger-full-access")
     if not data["projects"]:
@@ -131,7 +160,10 @@ def check_request(request, projects):
 
 def submit(mailbox, project, text, commit, authorization, after=None, title=None):
     capabilities = read(mailbox / "capabilities.json", root=mailbox)
+    caller_repo = git_root(Path.cwd())
+    project = select_project(capabilities.get("project_paths", {}), caller_repo, project)
     request = {"version": 1, "id": uuid.uuid4().hex, "project": project,
+               "caller_repo": str(caller_repo),
                "task": text, "expected_commit": commit, "authorization": authorization,
                "after": after, "created_at": now()}
     if title is not None:
@@ -189,6 +221,7 @@ class Worker:
             "heartbeat_timeout_seconds": 90,
             "active_task": active,
             "projects": list(self.config["projects"]),
+            "project_paths": project_paths(self.config["projects"]),
             "service_connected": self.probed,
             "computer_use": "advertised" if "cua_repl" in self.tools else "unverified",
             "note": "Tool discovery does not prove app permissions or browser availability.",
@@ -417,6 +450,10 @@ class Worker:
         self.files.atomic(job / "request.json", request)
         try:
             check_request(request, self.config["projects"])
+            # Old queued requests have no caller_repo; preserve their lifecycle.
+            if "caller_repo" in request:
+                select_project(project_paths(self.config["projects"]),
+                               request["caller_repo"], request["project"])
             for path, event in self.controls(record):
                 if event["kind"] == "cancel":
                     self.ack(record, path, event, "accepted")
@@ -536,7 +573,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("capabilities")
     submit_parser = sub.add_parser("submit")
-    submit_parser.add_argument("--project", required=True)
+    submit_parser.add_argument("--project", help="Optional assertion; must match the current Git repository mapping")
     submit_parser.add_argument("--title", required=True, help="Summarized task name for Herdr (1–5 characters)")
     source = submit_parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--task")

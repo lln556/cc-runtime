@@ -43,7 +43,11 @@ mv -f "$bin_dir/.cc-runtime-linux.$$" "$bin_dir/cc-runtime-linux"
 # CLAUDE_CODE_SHELL 指向这个链接：Claude Code 只接受路径里含 bash 或 zsh 的 shell。
 ln -sfn ../cc-runtime-linux "$bin_dir/remote-shell/zsh"
 ln -sfn ../cc-runtime-linux "$bin_dir/remote-shell/session-start"
-echo "已安装 ${bin_dir}/cc-runtime-linux（linux/${arch}，开发机的 remote-shell 客户端）"
+# Codex 的用户 shell 从 /etc/passwd 取，入口脚本把 dev 的登录 shell 指到 codex-shell/zsh。
+mkdir -p "$bin_dir/codex-shell"
+ln -sfn ../cc-runtime-linux "$bin_dir/codex-shell/zsh"
+ln -sfn ../cc-runtime-linux "$bin_dir/codex-shell/session-start"
+echo "已安装 ${bin_dir}/cc-runtime-linux（linux/${arch}，开发机的 remote-shell 客户端与 Codex shell）"
 
 if launchctl print "gui/$(id -u)/io.cc-runtime.remote-shell" >/dev/null 2>&1; then
     "$prefix/cc-runtime" remote-shell restart || echo "提示：remote-shell 服务仍是旧版本，确认后运行 cc-runtime remote-shell restart --force" >&2

@@ -3,5 +3,6 @@
 *
 !antigravity/
 !claude-code/
+!codex/
 !scripts/entrypoint.sh
 !shell/

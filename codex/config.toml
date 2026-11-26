@@ -1,0 +1,14 @@
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+allow_login_shell = false
+
+[sandbox_workspace_write]
+network_access = true
+
+[features]
+shell_snapshot = false
+unified_exec = false
+
+# 每条 shell 命令的环境里带上这个变量，codex-shell/zsh 据此决定交给 Mac 的 remote-shell。
+[shell_environment_policy.set]
+CC_CODEX_REMOTE_SHELL = "1"

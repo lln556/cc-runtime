@@ -10,6 +10,7 @@ on:
       - .dockerignore
       - antigravity/**
       - claude-code/**
+      - codex/**
       - scripts/entrypoint.sh
       - shell/**
       - .github/workflows/publish-image.yml

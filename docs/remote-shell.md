@@ -1,6 +1,6 @@
 # remote-shell
 
-remote-shell 让开发机里的编码代理（Claude Code、Antigravity 等）把命令交给 Mac 执行：代理进程、它的身份和 API 出口仍在开发机里，命令在使用者的 Mac 登录会话里运行，看到的是 Mac 的 PATH、Homebrew、Xcode、钥匙串和已装的依赖。项目只需要一套 Mac 依赖，不必再维护 Linux 版本。
+remote-shell 让开发机里的编码代理（Claude Code、Antigravity、Codex 等）把命令交给 Mac 执行：代理进程、它的身份和 API 出口仍在开发机里，命令在使用者的 Mac 登录会话里运行，看到的是 Mac 的 PATH、Homebrew、Xcode、钥匙串和已装的依赖。项目只需要一套 Mac 依赖，不必再维护 Linux 版本。
 
 所有开发机都这样工作，没有第二种模式。
 
@@ -116,6 +116,19 @@ Antigravity CLI（`agy`，由使用者按需装在 `~/.local/bin/agy`）没有 `
 | `setup` | 入口脚本在检测到 `~/.local/bin/agy` 或 `~/.gemini` 时运行（`agy` 包装器首次启动时也会兜底执行）：幂等链接 `~/.gemini/GEMINI.md`（使用者已改成普通文件时不覆盖），并在 `~/.gemini/config/hooks.json` 中合并 `remote-shell` 的 `SessionStart` hook（保留 Herdr 等已有 hook）；若存在容器内 T3 Code 的 Antigravity provider 目录也一并建立链接 |
 
 和 Claude Code 一样，Antigravity 会话必须在共享目录里启动；在 `/home/dev` 等非共享目录启动或服务不可达时，命令由 remote-shell 客户端直接报错拒绝，不会静默退回 Linux 容器执行。
+
+## 和 Codex CLI 的衔接
+
+Codex CLI 没有 `CLAUDE_CODE_SHELL` 这样的配置项：它用 `getpwuid` 从 `/etc/passwd` 取用户 shell，所以入口脚本把 `dev` 的登录 shell 改成 `/opt/cc-runtime/bin/codex-shell/zsh`。这个路径和 `remote-shell/zsh` 指向同一个程序，按命令环境里的 `CC_CODEX_REMOTE_SHELL` 决定去向：
+
+| 文件 | 作用 |
+| --- | --- |
+| `/etc/codex/config.toml` | 仓库 `codex/`，构建时打进镜像。`sandbox_mode`、`approval_policy`，并关掉 login shell、shell 快照和统一执行；`shell_environment_policy.set` 给每条 shell 命令加 `CC_CODEX_REMOTE_SHELL=1` |
+| `/etc/codex/requirements.toml` | 仓库 `codex/`，构建时打进镜像。`additional_developer_instructions` 是与 `claude-code/CLAUDE.md` 对应的执行环境规则；`allow_login_shell = false`；`[hooks]` 的 `SessionStart` 指向 `/opt/cc-runtime/bin/codex-shell/session-start` |
+| `codex-shell/zsh` | `scripts/install.sh` 建链接。带 `CC_CODEX_REMOTE_SHELL=1` 且是 `-c <命令>` 的调用交给 remote-shell 客户端（先解析符号链接工作目录，并带上 `CODEX_CI`）；其余调用留在容器：去掉变量后换成 `/bin/zsh`，`sshd` 用 `-zsh` 启动的登录 shell 保留登录语义（Codex 的 hook 由 `/bin/sh` 直接执行，不带 `shell_environment_policy` 变量，也留在容器内） |
+| `codex-shell/session-start` | 调用与 Claude Code 相同的探测逻辑，把 `additionalContext` 里的措辞换成 Codex 的说法（`Codex`、`shell 命令`、`shell 工具`），再按 Codex 的 `hookSpecificOutput` 输出 |
+
+`REMOTE_SHELL_LOCAL=1` 对 Codex 同样有效。和 Claude Code 一样，Codex 会话必须在共享目录里启动；服务不可达时命令直接失败，不会静默退回容器。改了 `codex/` 要重新构建镜像、重建开发机才生效，`cc-runtime check remote-shell` 会检查这些文件和两端路由。
 
 ## 协议
 

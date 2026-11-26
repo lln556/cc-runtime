@@ -580,6 +580,23 @@ func initializeCache(p Project, image string, s Service, uid, gid int) error {
 	return nil
 }
 
+func ensureRuntimeSamePathMounts(cfg config.Config, s Service) error {
+	runtime := filepath.Clean(cfg.Runtime)
+	for _, mount := range s.Volumes {
+		if mount.Type != "bind" {
+			continue
+		}
+		src, dst := filepath.Clean(mount.Source), filepath.Clean(mount.Target)
+		if src != dst || src == runtime || !within(src, runtime) {
+			continue
+		}
+		if err := os.MkdirAll(src, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Prepare 准备将要创建的开发机；services 为 nil 表示全部。
 func Prepare(cfg config.Config, p Project, services []string) error {
 	wanted := map[string]bool{}
@@ -617,6 +634,9 @@ func Prepare(cfg config.Config, p Project, services []string) error {
 			return err
 		}
 		if err := initializeCache(p, s.Image, s, uid, gid); err != nil {
+			return err
+		}
+		if err := ensureRuntimeSamePathMounts(cfg, s); err != nil {
 			return err
 		}
 		if _, err := remoteshell.PrepareMachine(cfg, remoteshell.Machine{Name: name, GatewayIP: GatewayIP(p, name),

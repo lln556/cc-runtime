@@ -199,6 +199,34 @@ RUN mkdir -p /home/dev/.local/bin /home/dev/.cache /home/dev/workspace && \
 	}
 }
 
+func TestEnsureRuntimeSamePathMounts(t *testing.T) {
+	base := t.TempDir()
+	cfg := testutil.MakeConfig(t, base, "")
+	worktrees := filepath.Join(cfg.Runtime, "t3-worktrees", "dev-a")
+	scratch := filepath.Join(cfg.Runtime, "t3-scratch", "dev-a")
+	outside := filepath.Join(base, "outside")
+	service := Service{Volumes: []Mount{
+		{Type: "bind", Source: worktrees, Target: worktrees},
+		{Type: "bind", Source: scratch, Target: scratch},
+		{Type: "bind", Source: filepath.Join(cfg.Runtime, "bin"), Target: "/opt/cc-runtime/bin"},
+		{Type: "bind", Source: outside, Target: outside},
+		{Type: "volume", Source: "cache", Target: "/home/dev/.cache"},
+	}}
+	if err := ensureRuntimeSamePathMounts(cfg, service); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{worktrees, scratch} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Errorf("%s 没有创建：%v", dir, err)
+		}
+	}
+	for _, dir := range []string{outside, filepath.Join(cfg.Runtime, "bin")} {
+		if util.Lexists(dir) {
+			t.Errorf("%s 不应被创建", dir)
+		}
+	}
+}
+
 func TestScreenshotsMount(t *testing.T) {
 	base := t.TempDir()
 	cfg := testutil.MakeConfig(t, base, "")

@@ -144,6 +144,7 @@ func checkMachine(cfg config.Config, r *checkReport, project deploy.Project, mac
 	if home := deploy.MountFor(service, deploy.HomeTarget); home != nil {
 		checkClaudeConfig(cfg, r, machine, home.Source)
 	}
+	checkCodexConfig(cfg, r, machine)
 	result, err := deploy.Exec(cfg, machine, "sh", "-c", `cd "$1" && exec "$2" -c 'uname -s; launchctl managername'`,
 		"sh", cfg.Workspace, remoteshell.ShellPath)
 	output := strings.Join(strings.Fields(result.Stdout+" "+result.Stderr), " ")
@@ -154,6 +155,89 @@ func checkMachine(cfg config.Config, r *checkReport, project deploy.Project, mac
 		r.fail("%s：命令的执行环境不对：%s（应为 Darwin Aqua）", machine, output)
 	default:
 		r.ok("%s：命令在 Mac 的登录会话里执行（%s）", machine, output)
+	}
+}
+
+func checkCodexConfig(cfg config.Config, r *checkReport, machine string) {
+	if result, err := deploy.Exec(cfg, machine, "test", "-f", "/etc/codex/config.toml"); err != nil || result.Code != 0 {
+		r.warn("%s：缺少 /etc/codex/config.toml，重新构建镜像并重建开发机后 Codex remote-shell 生效", machine)
+		return
+	}
+	read := func(path string) (string, bool) {
+		result, err := deploy.Exec(cfg, machine, "cat", path)
+		if err != nil || result.Code != 0 {
+			r.fail("%s：开发机里读不到 %s", machine, path)
+			return "", false
+		}
+		return result.Stdout, true
+	}
+	stale := func(name, text string) {
+		if want, err := os.ReadFile(filepath.Join(cfg.Root, "codex", name)); err == nil && string(want) != text {
+			r.warn("%s：/etc/codex/%s 和仓库的 codex/%s 不一致，重新构建镜像并重建开发机后生效", machine, name, name)
+		}
+	}
+	configText, ok := read("/etc/codex/config.toml")
+	if !ok {
+		return
+	}
+	stale("config.toml", configText)
+	requirementsText, ok := read("/etc/codex/requirements.toml")
+	if !ok {
+		return
+	}
+	stale("requirements.toml", requirementsText)
+	switch {
+	case !strings.Contains(configText, remoteshell.CodexRemoteEnv):
+		r.fail("%s：/etc/codex/config.toml 应在 shell_environment_policy 里设置 %s=1", machine, remoteshell.CodexRemoteEnv)
+	case !strings.Contains(requirementsText, remoteshell.CodexSessionStartPath):
+		r.fail("%s：/etc/codex/requirements.toml 缺少 SessionStart hook %s", machine, remoteshell.CodexSessionStartPath)
+	default:
+		r.ok("%s：Codex 系统级配置（%s、SessionStart hook）", machine, remoteshell.CodexRemoteEnv)
+	}
+	result, err := deploy.Exec(cfg, machine, "getent", "passwd", "dev")
+	shellField := ""
+	if err == nil && result.Code == 0 {
+		if fields := strings.Split(strings.TrimSpace(result.Stdout), ":"); len(fields) >= 7 {
+			shellField = strings.TrimSpace(fields[6])
+		}
+	}
+	if shellField != remoteshell.CodexShellPath {
+		r.fail("%s：dev 的登录 shell 应为 %s（入口脚本用 usermod 设置），当前是 %q", machine, remoteshell.CodexShellPath, shellField)
+	} else {
+		r.ok("%s：dev 登录 shell = %s", machine, shellField)
+	}
+	input, _ := json.Marshal(map[string]string{"cwd": cfg.Workspace, "source": "startup"})
+	result, err = deploy.Exec(cfg, machine, "sh", "-c", `printf '%s' "$1" | "$2"`, "sh", string(input), remoteshell.CodexSessionStartPath)
+	var hook struct {
+		Output struct {
+			Context string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	switch {
+	case err != nil || result.Code != 0 || json.Unmarshal([]byte(result.Stdout), &hook) != nil:
+		r.fail("%s：Codex SessionStart hook 运行失败：%s", machine, strings.TrimSpace(result.Stdout+" "+result.Stderr))
+	case !strings.Contains(hook.Output.Context, "macOS") || !strings.Contains(hook.Output.Context, "Codex"):
+		r.fail("%s：Codex SessionStart hook 没有得到 Mac 的信息或没换成 Codex 的说法：%s", machine, hook.Output.Context)
+	default:
+		r.ok("%s：Codex SessionStart hook", machine)
+	}
+	result, err = deploy.Exec(cfg, machine, "sh", "-c",
+		`cd "$1" && CC_CODEX_REMOTE_SHELL=1 "$2" -lc 'uname -s; launchctl managername'`, "sh", cfg.Workspace, remoteshell.CodexShellPath)
+	output := strings.Join(strings.Fields(result.Stdout+" "+result.Stderr), " ")
+	switch {
+	case err != nil || result.Code != 0:
+		r.fail("%s：Codex 的远程命令执行失败（退出码 %d）：%s", machine, result.Code, output)
+	case output != "Darwin Aqua":
+		r.fail("%s：Codex 命令的执行环境不对：%s（应为 Darwin Aqua）", machine, output)
+	default:
+		r.ok("%s：Codex 命令在 Mac 的登录会话里执行（%s）", machine, output)
+	}
+	result, err = deploy.Exec(cfg, machine, "sh", "-c", `cd "$1" && "$2" -c 'uname -s'`, "sh", cfg.Workspace, remoteshell.CodexShellPath)
+	output = strings.Join(strings.Fields(result.Stdout+" "+result.Stderr), " ")
+	if err != nil || result.Code != 0 || output != "Linux" {
+		r.fail("%s：Codex 的本地 shell 没有留在容器里（退出码 %d）：%s", machine, result.Code, output)
+	} else {
+		r.ok("%s：不带 %s 的 Codex shell 留在容器里（%s）", machine, remoteshell.CodexRemoteEnv, output)
 	}
 }
 

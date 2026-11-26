@@ -147,6 +147,7 @@ var passEnv = map[string]bool{
 	"CLAUDE_CODE_ENTRYPOINT": true,
 	"CLAUDE_CODE_SESSION_ID": true,
 	"AI_AGENT":               true,
+	"CODEX_CI":               true,
 	"GIT_EDITOR":             true,
 	"EDITOR":                 true,
 }

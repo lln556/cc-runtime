@@ -79,6 +79,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 # 本地文件放在工具安装之后，修改时复用 Claude Code 等工具层缓存。
 # Claude Code 的系统级设置：shell 指向 remote-shell、SessionStart hook、CLAUDE.md。
 COPY claude-code/ /etc/claude-code/
+COPY codex/ /etc/codex/
 # Antigravity（agy）接入 remote-shell 的包装器、bash 垫片、SessionStart hook 和 GEMINI.md。
 COPY antigravity/ /opt/cc-runtime/antigravity/
 COPY --chmod=0755 scripts/entrypoint.sh /usr/local/bin/entrypoint.sh

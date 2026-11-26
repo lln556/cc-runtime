@@ -49,6 +49,18 @@ else
     echo "⚠️  CC_REMOTE_SHELL_TMPDIR is not set; Claude Code scratchpad will not be shared with the Mac."
 fi
 
+# Codex CLI 从 /etc/passwd 取用户 shell：指向 codex-shell/zsh 后，带 CC_CODEX_REMOTE_SHELL=1
+# 的调用交给 Mac，交互登录、SSH 和本地脚本仍由普通 zsh 执行。
+CODEX_SHELL="/opt/cc-runtime/bin/codex-shell/zsh"
+if [ -x "$CODEX_SHELL" ]; then
+    if [ "$(getent passwd dev | cut -d: -f7)" != "$CODEX_SHELL" ]; then
+        sudo usermod -s "$CODEX_SHELL" dev
+        echo "✅ dev login shell: $CODEX_SHELL (Codex commands run on the Mac)"
+    fi
+else
+    echo "⚠️  $CODEX_SHELL is missing; Codex commands stay in the container. Install it on the Mac with scripts/install.sh."
+fi
+
 # 写在家目录：工作区是 Mac 的目录，不往里放开发机的文件。每次启动重写，和镜像保持一致。
 README_FILE="/home/dev/环境说明.md"
 cat > "$README_FILE" <<'EOF'

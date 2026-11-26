@@ -32,7 +32,7 @@ cc-runtime check proxy
 | `airport` 整个节点（`airport.example.com`、`REPLACE_AIRPORT_PASSWORD`） | 机场订阅中的一个完整节点，名称保留 `airport` |
 | `IP-CIDR,192.0.2.10/32,DIRECT,no-resolve` | 需要绕过代理链直连的主机 IP（例如自建出口节点的 VPS） |
 
-规则和 DNS 只引用策略组 `egress`，不直接引用出口节点名。每个网关在自己的 `egress groups` 块里把 `egress` 指向本网关的出口节点，所以 `rules` 与 `dns` 两段在三个文件中完全相同。
+共有规则和 DNS 使用 `egress`、`airport`、`DIRECT` 和 `tailnet`，不直接引用网关特有的出口节点名。每个网关在自己的 `egress groups` 块里把 `egress` 指向本网关的出口节点，所以 `rules` 与 `dns` 两段在派生配置中保持相同。
 
 | 块 | `config-pennsylvania.yaml`（主网关） | `config-california.yaml` |
 |---|---|---|
@@ -45,6 +45,8 @@ cc-runtime check proxy
 
 两个网关的分流完全相同：
 
+- Tailscale MagicDNS：`nameserver-policy` 的 `'+.ts.net': ['tcp://100.100.100.100:53#tailnet']` 经 sidecar 的 SOCKS5 查询其自身的 MagicDNS，不依赖 Mac 的 Tailscale 或系统 DNS。使用通用后缀，不在模板中填写个人 tailnet 名称。
+- Tailnet TCP：先匹配 `DOMAIN-SUFFIX,ts.net,tailnet`，再匹配 `IP-CIDR,100.64.0.0/10,tailnet,no-resolve`，均经 `172.30.0.3:1055`；域名规则也覆盖 HTTP/SOCKS 代理传入的域名。其他公网域名仍按后续规则分流，不交给 sidecar。
 - 公司、内网和直连域名：`DIRECT`，经 Docker 出口走宿主机网络；DNS 用系统解析器（Docker → 宿主机）。
 - 依赖与工具链下载（PyPI、npm、GitHub、Rust 等）：`airport`。
 - Anthropic、Datadog 及其他所有流量（`MATCH`）：`egress`。
@@ -53,21 +55,25 @@ cc-runtime check proxy
 
 ## 加州网关
 
-- 宿主机 HTTP/SOCKS 代理：`127.0.0.1:17890`；控制 API：`127.0.0.1:19091`（密钥同 `.env` 的 `PASSWORD`）。主网关 API 为 `127.0.0.1:19090`。
+- 当前 `compose.yaml` 的宿主机 HTTP/SOCKS 代理：`127.0.0.1:17890`；加州控制 API：`127.0.0.1:19090`（密钥同 `.env` 的 `PASSWORD`）。使用其他 Compose 配置时，先核对对应容器的端口映射，避免重载到其他网关。
 - `proxy-entrypoint.sh` 通过 `GATEWAY_IP` / `CLIENT_IP` 环境变量区分网关；`CLIENT_IP: 172.30.0.11` 为 `dev-california`。入口脚本拒绝 Docker 私网访问 7890，dev 容器不能借此绕过透明网关。
 - `california-upstream` 默认经 `airport` 连接出口节点，可在面板切到 `DIRECT`。
 - 服务端为 Xray 时注意：Xray 26 在 inbound 的 `minClientVer` 为空时会拒绝 Mihomo（表现为 `REALITY authentication failed`），需要把它设为 `1.0.0` 之类的低版本。
 
 ## 生效与验证
 
-实际配置以单文件 bind mount 挂入容器。编辑器保存时常会替换文件 inode，`restart` 后容器仍读旧文件，所以修改后要重建对应容器：
+实际配置以单文件 bind mount 挂入容器。优先原地覆盖写回，保持 inode 不变（例如 `cat /path/to/edited.yaml > proxy/config-california.yaml`），再校验配置并确认宿主机与容器内的 SHA256 相同：
 
 ```bash
 cc-runtime check proxy
-cc-runtime compose up -d --no-deps --force-recreate proxy-california
-# 主网关重建会短暂中断 dev-pennsylvania 的外网连接
-cc-runtime compose up -d --no-deps --force-recreate proxy-pennsylvania
+shasum -a 256 proxy/config-california.yaml
+docker exec cc-runtime-proxy-california-1 sha256sum /root/.config/mihomo/config.yaml
+docker exec cc-runtime-proxy-california-1 /mihomo -t -f /root/.config/mihomo/config.yaml
 ```
+
+确认端口映射后，对加州控制 API 执行 `PUT /configs?force=true`，请求体为 `{"path":"/root/.config/mihomo/config.yaml"}`，使用 `.env` 的 `PASSWORD` 作为 Bearer 凭据。不要把凭据写入文档、日志或共享命令输出。返回 204 后检查网关日志，并从开发机验证 MagicDNS、tailnet IP 和普通公网访问。热重载无需重启容器，可保留现有 TCP 连接。
+
+编辑器保存可能替换 inode，此时容器仍读旧文件，`restart` 也不能修复挂载。只有挂载内容不一致或热重载失败时，才执行 `cc-runtime compose up -d --no-deps --force-recreate proxy-california`，并等待网关恢复 `healthy`；重建会短暂中断它所服务的开发机连接。不要为网关配置修改重启开发机或 Tailscale sidecar。
 
 只校验语法时：
 

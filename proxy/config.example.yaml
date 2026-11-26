@@ -90,6 +90,8 @@ dns:
     - system
   # Direct domains use the Docker system resolver backed by the host DNS.
   nameserver-policy:
+    # MagicDNS over TCP via the tailscale sidecar; independent of host DNS.
+    '+.ts.net': ['tcp://100.100.100.100:53#tailnet']
     'host.docker.internal': system
     '+.aliyuncs.com': system
     '+.weimob.com': system
@@ -126,7 +128,8 @@ tunnels:
 # ==== END GATEWAY-SPECIFIC ====
 
 rules:
-  # Tailnet (Tailscale CGNAT range) through the tailscale service; no fallback.
+  # MagicDNS names and Tailscale CGNAT addresses through the sidecar; no fallback.
+  - DOMAIN-SUFFIX,ts.net,tailnet
   - IP-CIDR,100.64.0.0/10,tailnet,no-resolve
   # ==== GATEWAY-SPECIFIC: Sub2API direct host ====
   # ==== END GATEWAY-SPECIFIC ====

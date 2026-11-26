@@ -46,7 +46,7 @@ proxies:
     udp: false
 
 proxy-groups:
-  # Rules and DNS refer only to "egress"; each gateway points it at its own node.
+  # Rules and DNS share "egress" for the gateway's exit and "tailnet" for Tailscale.
   # ==== GATEWAY-SPECIFIC: egress groups ====
   - name: egress
     type: select
@@ -88,8 +88,10 @@ dns:
   # Prefer server IPs for egress nodes to avoid this dependency.
   proxy-server-nameserver:
     - system
-  # Direct domains use the Docker system resolver backed by the host DNS.
+  # Direct domains use the Docker system resolver; MagicDNS uses the sidecar.
   nameserver-policy:
+    # Query the sidecar's MagicDNS over TCP through its SOCKS5 listener.
+    '+.ts.net': ['tcp://100.100.100.100:53#tailnet']
     'host.docker.internal': system
     '+.aliyuncs.com': system
     '+.weimob.com': system
@@ -126,7 +128,8 @@ tunnels:
 # ==== END GATEWAY-SPECIFIC ====
 
 rules:
-  # Tailnet (Tailscale CGNAT range) through the tailscale service; no fallback.
+  # MagicDNS names and Tailscale CGNAT addresses through the sidecar; no fallback.
+  - DOMAIN-SUFFIX,ts.net,tailnet
   - IP-CIDR,100.64.0.0/10,tailnet,no-resolve
   - DOMAIN-SUFFIX,aliyuncs.com,DIRECT
   - IP-CIDR,8.154.36.79/32,DIRECT,no-resolve

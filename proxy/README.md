@@ -32,7 +32,7 @@ cc-runtime check proxy
 | `airport` 整个节点（`airport.example.com`、`REPLACE_AIRPORT_PASSWORD`） | 机场订阅中的一个完整节点，名称保留 `airport` |
 | `IP-CIDR,192.0.2.10/32,DIRECT,no-resolve` | 需要绕过代理链直连的主机 IP（例如自建出口节点的 VPS） |
 
-规则和 DNS 只引用策略组 `egress`，不直接引用出口节点名。每个网关在自己的 `egress groups` 块里把 `egress` 指向本网关的出口节点，所以 `rules` 与 `dns` 两段在三个文件中完全相同。
+规则和 DNS 共用 `egress` 策略组与 `tailnet` 代理：普通出口通过 `egress`，Tailscale 流量通过 `tailnet`，不直接引用网关特有的出口节点名。每个网关在自己的 `egress groups` 块里把 `egress` 指向本网关的出口节点，所以 `rules` 与 `dns` 两段在三个文件中完全相同。
 
 | 块 | `config-pennsylvania.yaml`（主网关） | `config-california.yaml` |
 |---|---|---|
@@ -45,6 +45,8 @@ cc-runtime check proxy
 
 两个网关的分流完全相同：
 
+- Tailscale：`DOMAIN-SUFFIX,ts.net,tailnet` 在 `IP-CIDR,100.64.0.0/10,tailnet,no-resolve` 之前匹配 MagicDNS 域名，两条规则都经 sidecar 的 SOCKS5 监听转发 TCP 连接；sidecar 不可用时没有回退。
+- MagicDNS：`dns.nameserver-policy` 的 `'+.ts.net': ['tcp://100.100.100.100:53#tailnet']` 通过 `tailnet` 向 sidecar 自身的 MagicDNS 发起 TCP DNS 查询，不依赖宿主机 Mac 的 Tailscale 状态。两台开发机可使用完整的 `*.ts.net` 名字访问 tailnet 设备；通用后缀规则无需填写个人 tailnet 域名。
 - 公司、内网和直连域名：`DIRECT`，经 Docker 出口走宿主机网络；DNS 用系统解析器（Docker → 宿主机）。
 - 依赖与工具链下载（PyPI、npm、GitHub、Rust 等）：`airport`。
 - Anthropic、Datadog 及其他所有流量（`MATCH`）：`egress`。

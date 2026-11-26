@@ -28,6 +28,9 @@ link_home_dir() {
 }
 WORKSPACE_DIR=${WORKSPACE_DIR:-/home/dev/workspace}
 link_home_dir "$WORKSPACE_DIR" /home/dev/workspace
+if [ -n "${PERSONAL_DIR:-}" ]; then
+    link_home_dir "$PERSONAL_DIR" /home/dev/personal
+fi
 link_home_dir "${DOWNLOADS_DIR:-/home/dev/Downloads}" /home/dev/Downloads
 # 当前目录（镜像的 WORKDIR）可能正是刚换掉的目录；重新进入，后面的进程才取得到它。
 cd /home/dev/workspace 2>/dev/null || cd /home/dev
@@ -149,6 +152,31 @@ fi
 
 if [ -x /home/dev/.local/bin/cc-switch ]; then
     /home/dev/.local/bin/cc-switch daemon start --detach >/tmp/cc-switch-daemon.log 2>&1 || true
+fi
+
+if [ -n "${T3_WORKTREES_DIR:-}" ] && [ -d /home/dev/.t3 ]; then
+    mkdir -p /home/dev/.t3/userdata
+    python3 - "$T3_WORKTREES_DIR" <<'PY'
+import json, os, sys
+target = sys.argv[1]
+path = "/home/dev/.t3/userdata/settings.json"
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            data = loaded
+    except Exception:
+        pass
+if data.get("worktreesDirectory") != target:
+    data["worktreesDirectory"] = target
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, path)
+PY
 fi
 
 if [ -f /home/dev/.t3/t3-lan-forwarder.py ]; then

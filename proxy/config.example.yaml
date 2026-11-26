@@ -132,8 +132,6 @@ rules:
   # ==== END GATEWAY-SPECIFIC ====
   - DOMAIN-SUFFIX,aliyuncs.com,DIRECT
   - IP-CIDR,8.154.36.79/32,DIRECT,no-resolve
-  - DOMAIN-SUFFIX,aliyuncs.com,DIRECT
-  - IP-CIDR,8.154.36.79/32,DIRECT,no-resolve
   # Single host that must not traverse the proxy chain (fill in the real IP).
   - IP-CIDR,192.0.2.10/32,DIRECT,no-resolve
   # Local LAN subnet.

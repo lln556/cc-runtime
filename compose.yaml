@@ -2,7 +2,7 @@
 name: cc-runtime
 
 x-dev-machine: &dev-machine
-  image: ${DEV_IMAGE:-ghcr.io/zeke-chin/cc-runtime:latest}
+  image: ${DEV_IMAGE:-ghcr.io/lln556/cc-runtime:latest}
   entrypoint: [/bin/bash, /usr/local/bin/entrypoint.sh]
   restart: unless-stopped
   cap_drop: [NET_RAW]

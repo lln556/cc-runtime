@@ -154,11 +154,15 @@ if [ -x /home/dev/.local/bin/cc-switch ]; then
     /home/dev/.local/bin/cc-switch daemon start --detach >/tmp/cc-switch-daemon.log 2>&1 || true
 fi
 
-if [ -n "${T3_WORKTREES_DIR:-}" ] && [ -d /home/dev/.t3 ]; then
+if [ -d /home/dev/.t3 ]; then
     mkdir -p /home/dev/.t3/userdata
-    python3 - "$T3_WORKTREES_DIR" <<'PY'
+    AGY_T3_BIN=""
+    if [ -x "$AGY_WRAP_DIR/agy" ] && [ -x /home/dev/.local/bin/agy ]; then
+        AGY_T3_BIN="$AGY_WRAP_DIR/agy"
+    fi
+    python3 - "${T3_WORKTREES_DIR:-}" "$AGY_T3_BIN" <<'PY'
 import json, os, sys
-target = sys.argv[1]
+worktrees_dir, agy_bin = sys.argv[1], sys.argv[2]
 path = "/home/dev/.t3/userdata/settings.json"
 data = {}
 if os.path.exists(path):
@@ -169,8 +173,22 @@ if os.path.exists(path):
             data = loaded
     except Exception:
         pass
-if data.get("worktreesDirectory") != target:
-    data["worktreesDirectory"] = target
+changed = False
+if worktrees_dir and data.get("worktreesDirectory") != worktrees_dir:
+    data["worktreesDirectory"] = worktrees_dir
+    changed = True
+if agy_bin:
+    providers = data.setdefault("providerInstances", {})
+    agy_inst = providers.setdefault("antigravity", {
+        "driver": "antigravity",
+        "displayName": "Antigravity",
+        "enabled": True,
+    })
+    cfg = agy_inst.setdefault("config", {})
+    if cfg.get("binaryPath") != agy_bin:
+        cfg["binaryPath"] = agy_bin
+        changed = True
+if changed:
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -183,12 +201,14 @@ if [ -f /home/dev/.t3/t3-lan-forwarder.py ]; then
     nohup python3 /home/dev/.t3/t3-lan-forwarder.py >/tmp/t3-lan-forwarder.log 2>&1 &
 fi
 
-if [ -x /home/dev/.t3/runtime/versions/0.1.11/t3 ]; then
+T3_BIN=$(ls -1v /home/dev/.t3/runtime/versions/*/t3 2>/dev/null | tail -n 1 || true)
+if [ -n "$T3_BIN" ] && [ -x "$T3_BIN" ]; then
     (
         cd /home/dev
+        mkdir -p /home/dev/.t3/ssh-launch/c365cb87c3b38122
         export SHELL=/bin/zsh
         export PATH="$AGY_WRAP_DIR:/home/dev/.local/bin:/home/dev/.local/share/swiftly/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-        nohup /home/dev/.t3/runtime/versions/0.1.11/t3 serve --host 127.0.0.1 --port 3773 --base-dir /home/dev/.t3 >> /home/dev/.t3/ssh-launch/c365cb87c3b38122/server.log 2>&1 </dev/null &
+        nohup "$T3_BIN" serve --host 127.0.0.1 --port 3773 --base-dir /home/dev/.t3 >> /home/dev/.t3/ssh-launch/c365cb87c3b38122/server.log 2>&1 </dev/null &
         echo $! > /home/dev/.t3/ssh-launch/c365cb87c3b38122/pid
     )
 fi

@@ -97,20 +97,11 @@ func CodexShellMain(fullArgs []string) int {
 		}
 		return 0
 	}
-	// Codex 和 Antigravity 一样可能从 ~/workspace、~/personal 这类符号链接进入；
-	// 容器里的 $PWD 是链接路径，Mac 上不存在，先解析成物理路径。
-	if cwd, err := os.Getwd(); err == nil {
-		if real, err := filepath.EvalSymlinks(cwd); err == nil && real != "" && real != cwd {
-			if os.Chdir(real) == nil {
-				os.Setenv("PWD", real)
-			}
-		}
-	}
 	return ClientMain(args)
 }
 
 // CodexSessionStartMain 是 Codex 的 SessionStart hook：探测结果按 Codex 的
-// hookSpecificOutput 格式输出，并先把未做 realpath 的符号链接 cwd 解析为物理路径。总是返回 0。
+// hookSpecificOutput 格式输出。总是返回 0。
 func CodexSessionStartMain(stdin io.Reader, stdout io.Writer) int {
-	return runSessionStart(stdin, stdout, codexAgent, true)
+	return runSessionStart(stdin, stdout, codexAgent)
 }

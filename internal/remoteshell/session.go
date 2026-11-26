@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -61,10 +60,10 @@ var (
 // 探测一次 Mac，把执行环境写进上下文。系统提示里的 Platform、OS Version 描述的是容器，
 // 这里纠正它；工作目录在 Mac 上不存在或服务不可达时，在会话一开始就说明。总是返回 0。
 func SessionStartMain(stdin io.Reader, stdout io.Writer) int {
-	return runSessionStart(stdin, stdout, claudeAgent, false)
+	return runSessionStart(stdin, stdout, claudeAgent)
 }
 
-func runSessionStart(stdin io.Reader, stdout io.Writer, agent sessionAgent, resolveSymlink bool) int {
+func runSessionStart(stdin io.Reader, stdout io.Writer, agent sessionAgent) int {
 	var input hookInput
 	if data, err := io.ReadAll(io.LimitReader(stdin, 1<<20)); err == nil {
 		json.Unmarshal(data, &input)
@@ -73,11 +72,7 @@ func runSessionStart(stdin io.Reader, stdout io.Writer, agent sessionAgent, reso
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	if resolveSymlink {
-		if real, err := filepath.EvalSymlinks(cwd); err == nil && real != "" {
-			cwd = real
-		}
-	}
+	cwd = evalSymlinksOrKeep(cwd)
 	output := map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "SessionStart", "additionalContext": sessionContextFor(cwd, agent)}}
 	data, _ := json.Marshal(output)

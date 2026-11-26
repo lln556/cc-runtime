@@ -50,6 +50,35 @@ func TestSessionStartDescribesTheMac(t *testing.T) {
 	}
 }
 
+func TestSessionStartResolvesSymlinkedCwd(t *testing.T) {
+	saved := ProbeCommand
+	t.Cleanup(func() { ProbeCommand = saved })
+	ProbeCommand = `printf '%s\n' 15.5 24F74 arm64`
+
+	addr, seen := startRecordingServer(t)
+	tmp := t.TempDir()
+	realDir := filepath.Join(tmp, "real-project")
+	linkDir := filepath.Join(tmp, "link-project")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Fatal(err)
+	}
+	wantReal, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	text := sessionStart(t, ClientConfig{Addr: addr, Token: testToken}, linkDir)
+	if !strings.Contains(text, "macOS 15.5") {
+		t.Fatalf("探测失败：\n%s", text)
+	}
+	if got := waitRecordedCwd(t, seen); got != wantReal {
+		t.Fatalf("服务收到的工作目录 %q，期望 %q", got, wantReal)
+	}
+}
+
 func TestSessionStartWarnsAboutMissingCwd(t *testing.T) {
 	_, addr := startServer(t)
 	text := sessionStart(t, ClientConfig{Addr: addr, Token: testToken}, "/no/such/dir")

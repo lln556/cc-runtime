@@ -80,6 +80,13 @@ func errorf(stderr io.Writer, format string, args ...any) {
 	fmt.Fprintf(stderr, "remote-shell："+format+"\n", args...)
 }
 
+func evalSymlinksOrKeep(dir string) string {
+	if real, err := filepath.EvalSymlinks(dir); err == nil && real != "" {
+		return real
+	}
+	return dir
+}
+
 // ClientMain 是开发机里 remote-shell 客户端的入口，参数和 shell 相同，返回退出码。
 func ClientMain(args []string) int {
 	if os.Getenv(LocalSwitch) == "1" {
@@ -115,6 +122,7 @@ func ClientMain(args []string) int {
 		errorf(os.Stderr, "无法取得当前目录：%v", err)
 		return 255
 	}
+	cwd = evalSymlinksOrKeep(cwd)
 	command, cwdFile, rewritten := RewriteCwd(invocation.Command)
 	request := Request{Version: ProtocolVersion, Token: cfg.Token, Cwd: cwd, Command: []byte(command),
 		Env: FilterEnv(os.Environ()), CaptureCwd: rewritten}

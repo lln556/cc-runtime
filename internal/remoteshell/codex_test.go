@@ -3,11 +3,13 @@ package remoteshell
 import (
 	"bytes"
 	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -16,6 +18,8 @@ func TestMain(m *testing.M) {
 		os.Exit(CodexShellMain(append([]string{os.Getenv("CC_TEST_CODEX_ARGV0")}, os.Args[1:]...)))
 	case "session-start":
 		os.Exit(CodexSessionStartMain(os.Stdin, os.Stdout))
+	case "client":
+		os.Exit(ClientMain(os.Args[1:]))
 	}
 	os.Exit(m.Run())
 }
@@ -44,20 +48,63 @@ func cleanCodexEnv(extra ...string) []string {
 	return append(env, extra...)
 }
 
-func runCodexShell(t *testing.T, argv0 string, args, env []string, dir string) (int, string) {
+func runTestBinary(t *testing.T, reexec, argv0 string, args, env []string, dir string) (int, string) {
 	t.Helper()
 	cmd := exec.Command(codexTestBinary(t), args...)
 	cmd.Dir = dir
-	cmd.Env = append(append([]string(nil), env...), "CC_TEST_CODEX_REEXEC=shell", "CC_TEST_CODEX_ARGV0="+argv0)
+	cmd.Env = append(append([]string(nil), env...), "CC_TEST_CODEX_REEXEC="+reexec, "CC_TEST_CODEX_ARGV0="+argv0)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return 0, string(out)
 	}
 	exitErr, ok := err.(*exec.ExitError)
 	if !ok {
-		t.Fatalf("运行 codex-shell 失败：%v\n%s", err, out)
+		t.Fatalf("运行测试二进制失败：%v\n%s", err, out)
 	}
 	return exitErr.ExitCode(), string(out)
+}
+
+func runCodexShell(t *testing.T, argv0 string, args, env []string, dir string) (int, string) {
+	t.Helper()
+	return runTestBinary(t, "shell", argv0, args, env, dir)
+}
+
+func runClient(t *testing.T, args, env []string, dir string) (int, string) {
+	t.Helper()
+	return runTestBinary(t, "client", "", args, env, dir)
+}
+
+func startRecordingServer(t *testing.T) (string, <-chan string) {
+	t.Helper()
+	server := &Server{Shell: shell(t), Env: os.Environ,
+		Auth: func() (map[string]string, error) { return map[string]string{testToken: "dev-test"}, nil }}
+	seen := make(chan string, 8)
+	server.State = func(active []Active) {
+		for _, item := range active {
+			select {
+			case seen <- item.Cwd:
+			default:
+			}
+		}
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go server.Serve(listener)
+	t.Cleanup(func() { listener.Close() })
+	return listener.Addr().String(), seen
+}
+
+func waitRecordedCwd(t *testing.T, seen <-chan string) string {
+	t.Helper()
+	select {
+	case cwd := <-seen:
+		return cwd
+	case <-time.After(5 * time.Second):
+		t.Fatal("服务没有收到命令")
+		return ""
+	}
 }
 
 func codexZsh(t *testing.T) string {
@@ -118,6 +165,39 @@ func TestCodexShellRoutesRemoteCommands(t *testing.T) {
 	}
 	if want := wantReal + "|1|unset\n"; out != want {
 		t.Fatalf("得到 %q，期望 %q", out, want)
+	}
+}
+
+func TestClientResolvesSymlinkedCwd(t *testing.T) {
+	addr, seen := startRecordingServer(t)
+	client := ClientConfig{Machine: "dev-test", Addr: addr, Token: testToken}
+	configPath := filepath.Join(t.TempDir(), "client.json")
+	data, _ := json.Marshal(client)
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tmp := t.TempDir()
+	realDir := filepath.Join(tmp, "real-workspace")
+	linkDir := filepath.Join(tmp, "link-workspace")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Fatal(err)
+	}
+	wantReal, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, out := runClient(t, []string{"-c", `printf 'ok\n'`},
+		cleanCodexEnv(ConfigEnv+"="+configPath, "PWD="+linkDir), linkDir)
+	if code != 0 || out != "ok\n" {
+		t.Fatalf("退出码 %d：%s", code, out)
+	}
+	if got := waitRecordedCwd(t, seen); got != wantReal {
+		t.Fatalf("服务收到的工作目录 %q，期望 %q", got, wantReal)
 	}
 }
 

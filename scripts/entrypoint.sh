@@ -172,9 +172,82 @@ if [ -d /home/dev/.t3 ]; then
     if [ -x "$AGY_WRAP_DIR/agy" ] && [ -x /home/dev/.local/bin/agy ]; then
         AGY_T3_BIN="$AGY_WRAP_DIR/agy"
     fi
-    python3 - "${T3_WORKTREES_DIR:-}" "$AGY_T3_BIN" <<'PY'
-import json, os, sys
-worktrees_dir, agy_bin = sys.argv[1], sys.argv[2]
+    python3 - "${T3_WORKTREES_DIR:-}" "$AGY_T3_BIN" "${T3_SCRATCH_DIR:-}" <<'PY'
+import json, os, shutil, sys
+
+worktrees_dir, agy_bin, scratch_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+
+
+def warn(message):
+    print("⚠️  " + message, file=sys.stderr)
+
+
+def remove_path(path):
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+    else:
+        os.unlink(path)
+
+
+def converge_scratch_link(scratch_dir):
+    if not scratch_dir:
+        return
+    scratch_dir = os.path.normpath(scratch_dir)
+    os.makedirs(scratch_dir, exist_ok=True)
+    link_path = "/home/dev/.t3/scratch"
+    if os.path.abspath(link_path) == os.path.abspath(scratch_dir):
+        return
+    if os.path.islink(link_path):
+        if os.readlink(link_path) == scratch_dir:
+            return
+        temporary = "{}.tmp.{}".format(link_path, os.getpid())
+        if os.path.lexists(temporary):
+            remove_path(temporary)
+        os.symlink(scratch_dir, temporary)
+        os.replace(temporary, link_path)
+        print("✅ T3 scratch: {} -> {}".format(link_path, scratch_dir))
+        return
+    if not os.path.lexists(link_path):
+        os.symlink(scratch_dir, link_path)
+        print("✅ T3 scratch: {} -> {}".format(link_path, scratch_dir))
+        return
+    if not os.path.isdir(link_path):
+        warn("{} 不是目录或符号链接，跳过迁移。".format(link_path))
+        return
+    migrated = 0
+    for name in os.listdir(link_path):
+        src = os.path.join(link_path, name)
+        dst = os.path.join(scratch_dir, name)
+        if os.path.lexists(dst):
+            warn("{} 已存在；{} 保留在原处，未覆盖。".format(dst, src))
+            continue
+        prefix = ".{}.migrating.".format(name)
+        for stale in os.listdir(scratch_dir):
+            if stale.startswith(prefix):
+                remove_path(os.path.join(scratch_dir, stale))
+        staging = os.path.join(scratch_dir, prefix + str(os.getpid()))
+        try:
+            if os.path.islink(src):
+                os.symlink(os.readlink(src), staging)
+            elif os.path.isdir(src):
+                shutil.copytree(src, staging, symlinks=True)
+            else:
+                shutil.copy2(src, staging)
+            os.rename(staging, dst)
+            remove_path(src)
+        except Exception as error:
+            warn("迁移 {} 失败（{}），已跳过。".format(src, error))
+            if os.path.lexists(staging):
+                remove_path(staging)
+            continue
+        migrated += 1
+    if os.listdir(link_path):
+        warn("{} 里仍有未迁移的内容，保留为目录。".format(link_path))
+        return
+    os.rmdir(link_path)
+    os.symlink(scratch_dir, link_path)
+    print("✅ T3 scratch: 迁移 {} 项，{} -> {}".format(migrated, link_path, scratch_dir))
+
 path = "/home/dev/.t3/userdata/settings.json"
 data = {}
 if os.path.exists(path):
@@ -206,6 +279,8 @@ if changed:
         json.dump(data, f, indent=2, ensure_ascii=False)
         f.write("\n")
     os.replace(tmp, path)
+
+converge_scratch_link(scratch_dir)
 PY
 fi
 

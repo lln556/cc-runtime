@@ -34,6 +34,7 @@ services:
       PERSONAL_DIR: /Users/axis/projects
       DOWNLOADS_DIR: ${DOWNLOADS_DIR}
       T3_WORKTREES_DIR: ${RUNTIME_DIR}/t3-worktrees/dev-california
+      T3_SCRATCH_DIR: ${RUNTIME_DIR}/t3-scratch/dev-california
       # Written by entrypoint.sh as a managed-settings drop-in (CLAUDE_CODE_TMPDIR).
       CC_REMOTE_SHELL_TMPDIR: ${RUNTIME_DIR}/remote-shell/dev-california/tmp
     volumes:
@@ -46,10 +47,10 @@ services:
       - {<<: *bind, source: "${WORKSPACE_DIR:?Set WORKSPACE_DIR in .env}", target: "${WORKSPACE_DIR}"}
       - {<<: *bind, source: /Users/axis/projects, target: /Users/axis/projects}
       - {<<: *bind, source: "${DOWNLOADS_DIR:?Set DOWNLOADS_DIR in .env}", target: "${DOWNLOADS_DIR}"}
-      # remote-shell: client.json (read-only), shared temp dir, T3 worktrees dir, and Linux client bin.
       - {<<: *bind, source: "${RUNTIME_DIR:?Set RUNTIME_DIR in .env}/remote-shell/dev-california", target: /var/lib/cc-runtime/remote-shell, read_only: true}
       - {<<: *bind, source: "${RUNTIME_DIR}/remote-shell/dev-california/tmp", target: "${RUNTIME_DIR}/remote-shell/dev-california/tmp"}
       - {<<: *bind, source: "${RUNTIME_DIR}/t3-worktrees/dev-california", target: "${RUNTIME_DIR}/t3-worktrees/dev-california"}
+      - {<<: *bind, source: "${RUNTIME_DIR}/t3-scratch/dev-california", target: "${RUNTIME_DIR}/t3-scratch/dev-california"}
       - {<<: *bind, source: "${RUNTIME_DIR}/bin", target: /opt/cc-runtime/bin, read_only: true}
       - type: volume
         source: cache

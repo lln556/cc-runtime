@@ -45,6 +45,7 @@ var Credentials = []string{
 var NotCopied = [][2]string{
 	{".claude.json", "Claude 的 userID、machineID 和 oauthAccount"},
 	{".claude/", "Claude Code 的全部配置、登录、skills、插件和历史"},
+	{".codex/（除当前版本二进制）", "Codex 的登录、installation_id、配置、skills 和会话历史"},
 	{".aliyun", "遥测实例 ID 和日志（不含凭据）"},
 	{".config/go/telemetry", "Go 遥测状态"},
 	{".local/state, .config/herdr, .servercc", "会话状态"},
@@ -64,6 +65,40 @@ func claudeCurrentVersion(source string) []string {
 	if util.Lexists(filepath.Join(source, target)) {
 		if _, err := os.Stat(filepath.Join(source, target)); err == nil {
 			return []string{filepath.ToSlash(filepath.Clean(target))}
+		}
+	}
+	return nil
+}
+
+// codexCurrentVersion 只复制 ~/.local/bin/codex 指向的当前 Codex 版本（保留 standalone/current
+// 链接及其指向的 release 目录），不复制 .codex 下的登录状态、installation_id 和会话历史。
+func codexCurrentVersion(source string) []string {
+	target, err := os.Readlink(filepath.Join(source, ".local/bin/codex"))
+	if err != nil {
+		return nil
+	}
+	rel := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(target, "/home/dev/")))
+	if filepath.IsAbs(rel) || strings.HasPrefix(rel, "..") {
+		return nil
+	}
+	const currentLink = ".codex/packages/standalone/current"
+	if strings.HasPrefix(rel, currentLink+"/") {
+		releaseTarget, err := os.Readlink(filepath.Join(source, currentLink))
+		if err != nil {
+			return nil
+		}
+		releaseRel := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(releaseTarget, "/home/dev/")))
+		if filepath.IsAbs(releaseRel) || strings.HasPrefix(releaseRel, "..") {
+			return nil
+		}
+		if info, err := os.Stat(filepath.Join(source, releaseRel)); err == nil && info.IsDir() {
+			return []string{currentLink, releaseRel}
+		}
+		return nil
+	}
+	if util.Lexists(filepath.Join(source, rel)) {
+		if _, err := os.Stat(filepath.Join(source, rel)); err == nil {
+			return []string{rel}
 		}
 	}
 	return nil
@@ -117,7 +152,7 @@ func Seed(source, destination string, opts Options) error {
 		if entries, err := os.ReadDir(dst); err == nil && len(entries) > 0 {
 			return util.Errorf("目标不为空：%s；拒绝合并家目录", dst)
 		}
-		paths = append(append(append([]string(nil), Copy...), claudeCurrentVersion(src)...), Credentials...)
+		paths = append(append(append(append([]string(nil), Copy...), claudeCurrentVersion(src)...), codexCurrentVersion(src)...), Credentials...)
 	}
 	for _, rel := range paths {
 		if !present(filepath.Join(src, rel)) {

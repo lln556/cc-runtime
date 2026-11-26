@@ -29,6 +29,11 @@ def main() -> None:
         else:
             cwd = os.getcwd()
 
+    # Antigravity 不会像 Claude Code 一样对启动目录做 realpath，
+    # 若经 ~/workspace、~/personal、~/Downloads 等符号链接进入，需解析为真实共享路径。
+    if isinstance(cwd, str) and cwd and os.path.exists(cwd):
+        cwd = os.path.realpath(cwd)
+
     if not os.path.isfile(PROBE_BIN) or not os.access(PROBE_BIN, os.X_OK):
         print("{}")
         return

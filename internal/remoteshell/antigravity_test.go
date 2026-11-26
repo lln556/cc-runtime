@@ -162,6 +162,30 @@ func TestAntigravityBashShimRoutingAndZshCompat(t *testing.T) {
 	if err != nil || !strings.HasPrefix(string(out), "LOCAL|") {
 		t.Fatalf("容器侧 hook 未走本地：%v %q", err, out)
 	}
+
+	// 5. 经符号链接工作目录（如 /home/dev/workspace/...）启动时，自动把 $PWD 解析为物理真实路径。
+	realWorkspace := filepath.Join(tmp, "real-workspace")
+	linkWorkspace := filepath.Join(tmp, "link-workspace")
+	if err := os.MkdirAll(realWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realWorkspace, linkWorkspace); err != nil {
+		t.Fatal(err)
+	}
+	wantReal, err := filepath.EvalSymlinks(realWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command(shim, "-c", "printf '%s\\n' \"$PWD\"")
+	cmd.Dir = linkWorkspace
+	cmd.Env = append(append([]string(nil), baseEnv...), "REMOTE_SHELL_LOCAL=", "PWD="+linkWorkspace)
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("符号链接目录执行失败：%v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "REMOTE|"+wantReal {
+		t.Fatalf("符号链接目录未解析为物理路径：得到 %q，期望 %q", got, "REMOTE|"+wantReal)
+	}
 }
 
 func TestAntigravityWrapperFindsRealBinaryWithoutRecursion(t *testing.T) {
@@ -196,13 +220,27 @@ func TestAntigravitySessionStartAdapter(t *testing.T) {
 	dir := stageAntigravityDir(t)
 	probe := filepath.Join(t.TempDir(), "probe")
 	probeOut := `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"本会话的 Bash 命令经 remote-shell 在宿主 Mac 上执行：macOS 15.5（24F74），arm64，zsh。系统信息里的 Platform、OS Version 描述的是运行 Claude Code 的 Linux 容器，不是命令执行的地方。\nClaude Code 的临时目录（scratchpad 在其中）：/tmp/shared，两侧路径相同。\n运行 Claude Code 的容器：cc-dev；需要容器内的环境时，在 Bash 里用 docker exec cc-dev sh -c '…'。"}}`
-	probeScript := "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '" + strings.ReplaceAll(probeOut, "'", "'\\''") + "'\n"
+	stdinRecord := filepath.Join(t.TempDir(), "probe-stdin.json")
+	probeScript := "#!/bin/sh\ncat > '" + stdinRecord + "'\nprintf '%s\\n' '" + strings.ReplaceAll(probeOut, "'", "'\\''") + "'\n"
 	if err := os.WriteFile(probe, []byte(probeScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
+	realDir := filepath.Join(t.TempDir(), "real-project")
+	linkDir := filepath.Join(t.TempDir(), "link-project")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Fatal(err)
+	}
+	wantReal, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	cmd := exec.Command(filepath.Join(dir, "session-start"))
-	cmd.Stdin = strings.NewReader(`{"workspacePaths":["/workspace/demo"]}`)
+	cmd.Stdin = strings.NewReader(`{"cwd":"` + linkDir + `"}`)
 	cmd.Env = append(os.Environ(), "REMOTE_SHELL_SESSION_START="+probe)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -223,5 +261,9 @@ func TestAntigravitySessionStartAdapter(t *testing.T) {
 		!strings.Contains(msg, "Antigravity (agy)") ||
 		strings.Contains(msg, "Claude Code") {
 		t.Fatalf("消息替换不对：%s", msg)
+	}
+	recorded, err := os.ReadFile(stdinRecord)
+	if err != nil || !strings.Contains(string(recorded), wantReal) {
+		t.Fatalf("session-start 未将符号链接 cwd 解析为真实路径 %q：%s", wantReal, recorded)
 	}
 }

@@ -88,6 +88,14 @@ shift "$skip"
 cmd_str="$1"
 shift
 
+# Antigravity 保留未解析的符号链接 $PWD（如 /home/dev/workspace/...），
+# 而 Go 的 os.Getwd() 会优先采用与当前目录同 inode 的 $PWD，导致 Mac 侧找不到该路径。
+if phys_pwd=$(pwd -P 2>/dev/null) && [ -n "$phys_pwd" ]; then
+    cd -P . 2>/dev/null || true
+    PWD="$phys_pwd"
+    export PWD
+fi
+
 nl='
 '
 exec "$REMOTE_ZSH" -c "setopt sh_word_split clobber interactive_comments; unsetopt nomatch${nl}${cmd_str}" "$@"
